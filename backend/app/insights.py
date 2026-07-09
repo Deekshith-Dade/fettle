@@ -129,6 +129,30 @@ def _pearson(xs: list[float], ys: list[float]) -> float | None:
     return sum((xs[i] - mx) * (ys[i] - my) for i in range(n)) / (sx * sy)
 
 
+def _rank(xs: list[float]) -> list[float]:
+    """Fractional ranks (ties get the average rank) — the basis for Spearman."""
+    order = sorted(range(len(xs)), key=lambda i: xs[i])
+    ranks = [0.0] * len(xs)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and xs[order[j + 1]] == xs[order[i]]:
+            j += 1
+        avg = (i + j) / 2 + 1  # 1-based average rank across the tie group
+        for k in range(i, j + 1):
+            ranks[order[k]] = avg
+        i = j + 1
+    return ranks
+
+
+def _spearman(xs: list[float], ys: list[float]) -> float | None:
+    """Rank correlation — robust to the skew and outliers of wearable data (Bishara &
+    Hittner 2012), so it's the honest default over Pearson for n-of-1 series."""
+    if len(xs) < 4:
+        return None
+    return _pearson(_rank(xs), _rank(ys))
+
+
 def _fmt(v: float, unit: str = "") -> str:
     if abs(v) >= 100:
         s = f"{v:,.0f}"
@@ -393,35 +417,63 @@ def _rhr_elevation(cache: dict[str, list[dict]]) -> list[dict[str, Any]]:
     return []
 
 
+# Driver → outcome relationships worth testing, each with a plausible mechanism and lag
+# (0 = same day, 1 = next day) drawn from the literature (exercise→deep sleep, strain→next-day
+# HRV/RHR, sleep→readiness). We only *surface* a link the data actually supports.
+_CORR_SPECS: list[tuple[str, str, int, str, str]] = [
+    ("sleep-duration", "readiness", 1, "Sleeping longer", "next-day readiness"),
+    ("sleep-score", "readiness", 1, "A better night's sleep", "next-day readiness"),
+    ("sleep-efficiency", "readiness", 1, "More efficient sleep", "next-day readiness"),
+    ("cardio-load", "readiness", 1, "Heavier training", "next-day readiness"),
+    ("sedentary-period", "readiness", 1, "More sedentary time", "next-day readiness"),
+    ("steps", "sleep-deep", 0, "More daily steps", "deep sleep that night"),
+    ("cardio-load", "sleep-deep", 0, "Heavier training", "deep sleep that night"),
+    ("active-zone-minutes", "sleep-deep", 0, "More active-zone minutes", "deep sleep that night"),
+    ("cardio-load", "daily-resting-heart-rate", 1, "Heavier training", "next-day resting HR"),
+    ("sleep-duration", "daily-resting-heart-rate", 1, "Sleeping longer", "next-day resting HR"),
+    ("cardio-load", "daily-heart-rate-variability", 1, "Heavier training", "next-day HRV"),
+]
+
+
 def _correlations(cache: dict[str, list[dict]]) -> list[dict[str, Any]]:
-    """How strongly a prior-day metric tracks next-day readiness."""
+    """Associations between a driver metric and a later outcome — Spearman, honestly framed.
+
+    Rank correlation (robust to skew/outliers), a minimum of paired days, an effect-size read
+    on the empirical 0.2/0.3 scale (r≈0.3 is already strong for personal data), and language
+    that says 'associated with', never 'causes'. Small samples are flagged preliminary."""
     out = []
-    ready = dict(_series("readiness", cache))
-    pairs_spec = [
-        ("sleep-duration", "Sleeping longer"),
-        ("sleep-score", "A better sleep score"),
-        ("cardio-load", "Heavier training"),
-    ]
-    for dt, phrase in pairs_spec:
-        s = _series(dt, cache)
+    outcome_maps: dict[str, dict] = {}
+    for _, outcome, *_rest in _CORR_SPECS:
+        if outcome not in outcome_maps:
+            outcome_maps[outcome] = dict(_series(outcome, cache))
+    for drv, outcome, lag, dphrase, ophrase in _CORR_SPECS:
+        omap = outcome_maps[outcome]
         xs, ys = [], []
-        for d, v in s:
-            nxt = ready.get(d + timedelta(days=1))
+        for d, v in _series(drv, cache):
+            nxt = omap.get(d + timedelta(days=lag))
             if nxt is not None:
                 xs.append(v)
                 ys.append(nxt)
-        r = _pearson(xs, ys)
-        if r is None or abs(r) < 0.35:
+        n = len(xs)
+        if n < 14:
+            continue
+        r = _spearman(xs, ys)
+        if r is None or abs(r) < 0.3:
             continue
         direction = "higher" if r > 0 else "lower"
-        sentiment = "info"
+        strength = "a strong" if abs(r) >= 0.5 else "a moderate"
+        prelim = " · preliminary, more days will sharpen it" if n < 30 else ""
         out.append({
-            "id": f"corr-{dt}", "kind": "correlation", "sentiment": sentiment, "metric": dt,
-            "title": f"{phrase} → {direction} readiness",
-            "detail": f"Across {len(xs)} days, {phrase.lower()} tends to precede "
-                      f"{direction} next-day readiness (r = {r:+.2f}).",
-            "priority": 30 + abs(r) * 20,
+            "id": f"corr-{drv}-{outcome}", "kind": "correlation", "sentiment": "info",
+            "metric": drv,
+            "title": f"{dphrase} → {direction} {ophrase}",
+            "detail": f"Over {n} days, {dphrase.lower()} is associated with {direction} "
+                      f"{ophrase} — {strength} link (Spearman r = {r:+.2f}){prelim}. "
+                      f"An association, not proof of cause.",
+            "priority": 30 + abs(r) * 24,
         })
+    # Strongest links first; the feed's per-metric cap keeps any one driver from dominating.
+    out.sort(key=lambda c: c["priority"], reverse=True)
     return out
 
 
