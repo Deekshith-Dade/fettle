@@ -512,6 +512,18 @@ const GOAL_STATUS: Record<Goal["status"], { color: string; word: string }> = {
   "no-data": { color: "#646b78", word: "No data" },
 };
 
+// The hues above are the dark-theme neons; on paper they wash out (the lime "met" worst of
+// all — near-invisible as badge text on near-white). Resolve a deepened equivalent from the
+// live theme, matching the light-token palette. Mirrors scoreColor().
+function goalColor(status: Goal["status"]): string {
+  const light = typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "light";
+  if (!light) return GOAL_STATUS[status].color;
+  return status === "met" ? "#5f8c0f"
+    : status === "on-track" ? "#a9710c"
+    : status === "off-track" ? "#cf4d63"
+    : "#838a94";
+}
+
 function GoalRing({ pct, color }: { pct: number; color: string }) {
   const shown = useCountUp(pct, 800);
   const r = 42, c = 2 * Math.PI * r;
@@ -560,7 +572,7 @@ function GoalCard({ g, onOpen, onEdit, onRemove }: {
 
   if (editing) {
     return (
-      <div className={`goal s-${g.status} is-editing`} style={{ "--gc": meta.color } as CSSProperties}>
+      <div className={`goal s-${g.status} is-editing`} style={{ "--gc": goalColor(g.status) } as CSSProperties}>
         <div className="goal-edit">
           <div className="goal-head">
             <span className="goal-label">{g.label}</span>
@@ -586,7 +598,7 @@ function GoalCard({ g, onOpen, onEdit, onRemove }: {
   }
 
   return (
-    <div className={`goal s-${g.status}`} style={{ "--gc": meta.color } as CSSProperties}>
+    <div className={`goal s-${g.status}`} style={{ "--gc": goalColor(g.status) } as CSSProperties}>
       <button className="goal-body" onClick={() => onOpen(g.data_type)}>
         <div className="goal-head">
           <span className="goal-label">{g.label}</span>
@@ -689,7 +701,7 @@ function GoalsAggregate({ summary, scored }: { summary: GoalsResponse["summary"]
         <div className="agg-dots" aria-hidden>
           {scored.map((g) => (
             <span key={g.id} className="agg-dot" title={`${g.label}: ${GOAL_STATUS[g.status].word}`}
-              style={{ background: GOAL_STATUS[g.status].color }} />
+              style={{ background: goalColor(g.status) }} />
           ))}
         </div>
       </div>
@@ -817,6 +829,16 @@ const tooltipStyle = {
   fontSize: 12,
 } as const;
 
+// recharts renders colors as SVG presentation attributes, which don't resolve CSS var(),
+// so chart structure/series colors are picked from the live theme here. A dark tooltip
+// (above) reads fine over either background, so it stays constant. Matches the token palette.
+function chartInk() {
+  const light = typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "light";
+  return light
+    ? { grid: "rgba(18,22,28,0.07)", refFaint: "rgba(18,22,28,0.22)", axis: "#838a94", lime: "#5f8c0f", cyan: "#1f8ea4" }
+    : { grid: "rgba(255,255,255,0.05)", refFaint: "rgba(255,255,255,0.22)", axis: "#646b78", lime: "#cdf24e", cyan: "#7fe3ef" };
+}
+
 function Drawer({
   info, series, intraday, intradayLoading, goal, onClose,
 }: {
@@ -870,6 +892,7 @@ function Drawer({
     return pick;
   }, [series, lowerBetter, neutral]);
   const recordLabel = neutral ? "Peak" : lowerBetter ? "Lowest ever" : "Personal best";
+  const ci = chartInk();
 
   return (
     <>
@@ -920,7 +943,7 @@ function Drawer({
         )}
 
         {goal && (
-          <div className="dw-goal" style={{ "--gc": GOAL_STATUS[goal.status].color } as CSSProperties}>
+          <div className="dw-goal" style={{ "--gc": goalColor(goal.status) } as CSSProperties}>
             <div className="dw-goal-top">
               <span className="dw-goal-k">Your goal</span>
               <span className="dw-goal-badge">{GOAL_STATUS[goal.status].word}</span>
@@ -947,28 +970,28 @@ function Drawer({
               <AreaChart data={data} margin={{ left: -6, right: 8, top: 6 }}>
                 <defs>
                   <linearGradient id="ga" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#cdf24e" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="#cdf24e" stopOpacity={0} />
+                    <stop offset="0%" stopColor={ci.lime} stopOpacity={0.35} />
+                    <stop offset="100%" stopColor={ci.lime} stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
-                <XAxis dataKey="x" stroke="#646b78" fontSize={11} minTickGap={46}
+                <CartesianGrid stroke={ci.grid} vertical={false} />
+                <XAxis dataKey="x" stroke={ci.axis} fontSize={11} minTickGap={46}
                   tickLine={false} axisLine={false} tickFormatter={(d) => fmtDay(d)} />
-                <YAxis stroke="#646b78" fontSize={11} width={44} domain={["auto", "auto"]}
+                <YAxis stroke={ci.axis} fontSize={11} width={44} domain={["auto", "auto"]}
                   tickLine={false} axisLine={false} />
                 <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: "#9aa1ab" }}
                   labelFormatter={(d) => fmtDayLong(String(d))}
                   formatter={(val) => [`${formatNum(Number(val))}${info.unit ? ` ${info.unit}` : ""}`, info.label]} />
                 {base28 != null && (
-                  <ReferenceLine y={base28} stroke="rgba(255,255,255,0.22)" strokeDasharray="5 5"
-                    label={{ value: "28d avg", position: "insideTopRight", fill: "#646b78", fontSize: 10 }} />
+                  <ReferenceLine y={base28} stroke={ci.refFaint} strokeDasharray="5 5"
+                    label={{ value: "28d avg", position: "insideTopRight", fill: ci.axis, fontSize: 10 }} />
                 )}
                 {goal && (
-                  <ReferenceLine y={goal.target} stroke={GOAL_STATUS[goal.status].color} strokeDasharray="6 3" strokeWidth={1.5}
+                  <ReferenceLine y={goal.target} stroke={goalColor(goal.status)} strokeDasharray="6 3" strokeWidth={1.5}
                     label={{ value: `goal ${goal.comparator === "gte" ? "≥" : "≤"} ${formatNum(goal.target)}`,
-                      position: "insideBottomRight", fill: GOAL_STATUS[goal.status].color, fontSize: 10 }} />
+                      position: "insideBottomRight", fill: goalColor(goal.status), fontSize: 10 }} />
                 )}
-                <Area type="monotone" dataKey="y" stroke="#cdf24e" fill="url(#ga)"
+                <Area type="monotone" dataKey="y" stroke={ci.lime} fill="url(#ga)"
                   strokeWidth={2} connectNulls dot={false} activeDot={{ r: 3.5, strokeWidth: 0 }}
                   isAnimationActive={false} />
               </AreaChart>
@@ -986,15 +1009,15 @@ function Drawer({
             ) : (
               <ResponsiveContainer width="100%" height={170}>
                 <LineChart data={intraday.map((p) => ({ x: p.ts, y: p.value }))} margin={{ left: -6, right: 8 }}>
-                  <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
-                  <XAxis dataKey="x" stroke="#646b78" fontSize={10} minTickGap={64}
+                  <CartesianGrid stroke={ci.grid} vertical={false} />
+                  <XAxis dataKey="x" stroke={ci.axis} fontSize={10} minTickGap={64}
                     tickLine={false} axisLine={false} tickFormatter={(t) => fmtClock(String(t))} />
-                  <YAxis stroke="#646b78" fontSize={11} width={44} domain={["auto", "auto"]}
+                  <YAxis stroke={ci.axis} fontSize={11} width={44} domain={["auto", "auto"]}
                     tickLine={false} axisLine={false} />
                   <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: "#9aa1ab" }}
                     labelFormatter={(t) => new Date(String(t)).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                     formatter={(val) => [`${formatNum(Number(val))}${info.unit ? ` ${info.unit}` : ""}`, info.label]} />
-                  <Line type="monotone" dataKey="y" stroke="#7fe3ef" dot={false} strokeWidth={1.5}
+                  <Line type="monotone" dataKey="y" stroke={ci.cyan} dot={false} strokeWidth={1.5}
                     isAnimationActive={false} />
                 </LineChart>
               </ResponsiveContainer>
