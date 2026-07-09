@@ -275,7 +275,6 @@ body::before {
 .sec-glyph svg { width: 19px; height: 19px; }
 .sec-title { font-family: var(--font-display); font-size: 25px; font-weight: 400; letter-spacing: -0.01em; margin: 0; }
 .sec-count { font-size: 11.5px; color: var(--faint); letter-spacing: 0.08em; text-transform: uppercase; font-variant-numeric: tabular-nums; }
-.sec-blurb { color: var(--faint); font-size: 13px; margin: 0 0 18px; }
 .sec-rule { border: none; border-top: 1px solid var(--hairline); margin: 0 0 18px; }
 
 /* ---------- insights ---------- */
@@ -496,14 +495,19 @@ body::before {
 .tile-spark { margin-top: auto; height: 38px; position: relative; }
 .spark { display: block; width: 100%; height: 100%; color: var(--lime); overflow: visible; }
 .spark polyline.line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 1s var(--ease) 0.25s forwards; }
+/* after the entry animation, the line becomes plain — immune to animation restarts */
+.spark polyline.line.drawn { animation: none; stroke-dasharray: none; stroke-dashoffset: 0; }
 @keyframes draw { to { stroke-dashoffset: 0; } }
+/* Hover readout sits on whichever side of the spark the cursor ISN'T (Spark adds
+   .flip when hovering the right half) — always inside the card, never over the dot. */
 .spark-tip {
   position: absolute; top: -22px; right: 0; pointer-events: none;
   font-size: 10.5px; color: var(--text); background: var(--panel-solid);
   border: 1px solid var(--line-strong); border-radius: 6px; padding: 2px 7px;
   white-space: nowrap; font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
-  z-index: 2;
+  z-index: 2; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
 }
+.spark-tip.flip { right: auto; left: 0; }
 .spark-dot {
   position: absolute; width: 6px; height: 6px; border-radius: 50%;
   background: var(--lime); transform: translate(-50%, -50%); pointer-events: none;
@@ -1142,6 +1146,61 @@ body::before {
 .coach-foot {
   text-align: center; font-size: 11px; color: var(--faint);
   letter-spacing: 0.03em; margin: 9px 0 0;
+}
+
+/* --- workouts log (Metrics · Workouts group) --- */
+.wlog { display: flex; flex-direction: column; gap: 5px; margin-bottom: 20px; }
+.wlog-row {
+  display: grid; grid-template-columns: 128px minmax(110px, 0.6fr) 1fr;
+  gap: 16px; align-items: baseline;
+  padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--panel); font-size: 13px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.wlog-row:hover { border-color: var(--line-strong); background: var(--panel-hi); }
+.wlog-when { color: var(--text); font-weight: 550; white-space: nowrap; }
+.wlog-time { color: var(--faint); font-weight: 400; margin-left: 8px; font-size: 11.5px; }
+.wlog-what { color: var(--muted); }
+.wlog-stats {
+  display: flex; flex-wrap: wrap; gap: 4px 16px; justify-content: flex-end;
+  font-variant-numeric: tabular-nums; color: var(--text);
+}
+.wlog-stats em { font-style: normal; white-space: nowrap; }
+.wlog-stats i { font-style: normal; color: var(--faint); font-size: 10.5px; margin-left: 3px; }
+.wlog-more { font-size: 11.5px; color: var(--faint); margin: 3px 2px 0; }
+@media (max-width: 680px) {
+  .wlog-row { grid-template-columns: 1fr auto; }
+  .wlog-what { grid-column: 1; }
+  .wlog-stats { grid-column: 1 / -1; justify-content: flex-start; }
+}
+
+/* --- workouts view (stats, volume, mix) --- */
+.wk-stats { margin-bottom: 22px; max-width: 620px; }
+.wk-delta { display: block; font-size: 11px; margin-top: 4px; color: var(--faint); }
+.wk-delta.up { color: var(--lime); }
+.wk-delta.down { color: var(--amber); }
+.wk-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 26px; }
+.wk-panel { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 15px 17px 13px; }
+.wk-panel .eyebrow { margin-bottom: 12px; }
+.wk-bars { display: flex; gap: 8px; align-items: flex-end; height: 108px; }
+.wk-bcol { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
+.wk-bar {
+  background: var(--lime-dim); border-top: 2px solid var(--lime);
+  border-radius: 4px 4px 0 0; min-height: 2px; transition: height 0.6s var(--ease);
+}
+.wk-bx { font-size: 9px; color: var(--faint); text-align: center; margin-top: 5px; white-space: nowrap; overflow: hidden; }
+.wk-mix { display: flex; flex-direction: column; gap: 10px; }
+.wk-mrow { display: grid; grid-template-columns: minmax(76px, 110px) 1fr auto; gap: 11px; align-items: center; font-size: 12.5px; }
+.wk-mlabel { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wk-mval { color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wk-mval i { font-style: normal; color: var(--faint); font-size: 10.5px; }
+.wlog-month {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.16em;
+  color: var(--faint); font-weight: 600; margin: 16px 2px 7px;
+}
+.wlog-morebtn { margin: 12px auto 0; }
+@media (max-width: 760px) {
+  .wk-cols { grid-template-columns: 1fr; }
 }
 
 /* --- LLM daily briefing (Insights tab) --- */

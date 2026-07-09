@@ -10,7 +10,7 @@ import json
 import sqlite3
 from collections import defaultdict
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
@@ -55,6 +55,25 @@ CREATE TABLE IF NOT EXISTS goals (
     created_at TEXT NOT NULL,
     active     INTEGER NOT NULL DEFAULT 1
 );
+
+-- Individual exercise sessions (the daily exercise-* metrics are their aggregates).
+CREATE TABLE IF NOT EXISTS workout_sessions (
+    id           TEXT PRIMARY KEY,    -- API dataPoint name (stable across syncs)
+    day          TEXT NOT NULL,       -- local civil date of the start
+    start_ts     TEXT NOT NULL,       -- UTC
+    start_local  TEXT NOT NULL,       -- naive local ISO for display
+    end_ts       TEXT,
+    activity     TEXT,
+    duration_min REAL,                -- active duration (pauses excluded)
+    calories     REAL,
+    distance_km  REAL,
+    steps        INTEGER,
+    avg_hr       REAL,
+    azm          REAL,
+    raw          TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_workouts_day ON workout_sessions (day);
 """
 
 
@@ -388,6 +407,42 @@ def query_intraday(
             ") WHERE (rn - 1) % ? = 0 ORDER BY ts"
         )
         return [dict(r) for r in conn.execute(sql, [*params, stride]).fetchall()]
+
+
+# --- workout sessions ---------------------------------------------------------
+
+def upsert_workouts(sessions: list[dict[str, Any]]) -> int:
+    """Idempotently store parsed exercise sessions (keyed by the API point name)."""
+    if not sessions:
+        return 0
+    with _connect() as conn:
+        conn.executemany(
+            "INSERT INTO workout_sessions (id, day, start_ts, start_local, end_ts, activity, "
+            "duration_min, calories, distance_km, steps, avg_hr, azm, raw) "
+            "VALUES (:id, :day, :start_ts, :start_local, :end_ts, :activity, "
+            ":duration_min, :calories, :distance_km, :steps, :avg_hr, :azm, :raw) "
+            "ON CONFLICT(id) DO UPDATE SET day=excluded.day, start_ts=excluded.start_ts, "
+            "start_local=excluded.start_local, end_ts=excluded.end_ts, activity=excluded.activity, "
+            "duration_min=excluded.duration_min, calories=excluded.calories, "
+            "distance_km=excluded.distance_km, steps=excluded.steps, avg_hr=excluded.avg_hr, "
+            "azm=excluded.azm, raw=excluded.raw",
+            sessions,
+        )
+    return len(sessions)
+
+
+def query_workouts(days: int | None = 90, limit: int = 200) -> list[dict]:
+    """Individual sessions, newest first."""
+    sql = ("SELECT id, day, start_local, activity, duration_min, calories, distance_km, "
+           "steps, avg_hr, azm FROM workout_sessions")
+    params: list[Any] = []
+    if days:
+        sql += " WHERE day >= ?"
+        params.append((date.today() - timedelta(days=days)).isoformat())
+    sql += " ORDER BY start_ts DESC LIMIT ?"
+    params.append(limit)
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
 # --- goals ------------------------------------------------------------------

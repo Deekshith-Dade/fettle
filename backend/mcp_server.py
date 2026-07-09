@@ -185,6 +185,16 @@ def get_goals() -> dict:
     return goals.evaluate_all()
 
 
+@mcp.tool()
+def get_workouts(days: int = 30) -> list[dict]:
+    """Individual workout sessions over the last `days`, newest first: activity, local
+    start time, active duration (min), calories, distance (km), steps, average heart
+    rate, and active-zone minutes. Use for questions about specific sessions ("how was
+    yesterday's run?") — the exercise-* daily metrics are just these summed per day."""
+    days = max(1, min(365, days))
+    return store.query_workouts(days=days, limit=100)
+
+
 # --- goal management (the only write tools; everything else is read-only) -------
 
 class Comparator(str, Enum):

@@ -66,6 +66,20 @@ export type Insight = {
   gauge?: { value: number; zones: number[]; max: number };
 };
 
+/** One exercise session — the exercise-* daily metrics aggregate these. */
+export type Workout = {
+  id: string;
+  day: string;
+  start_local: string;
+  activity: string;
+  duration_min: number | null;
+  calories: number | null;
+  distance_km: number | null;
+  steps: number | null;
+  avg_hr: number | null;
+  azm: number | null;
+};
+
 /** LLM-synthesized daily briefing over the computed insight evidence. */
 export type Briefing = {
   day: string;
@@ -161,6 +175,7 @@ export const api = {
       }[];
     }>("/api/readiness"),
   insights: () => get<{ insights: Insight[] }>("/api/insights"),
+  workouts: (days = 60) => get<{ workouts: Workout[] }>(`/api/workouts?days=${days}`),
   briefing: () => get<{ briefing: Briefing | null }>("/api/briefing"),
   refreshBriefing: (): Promise<{ briefing: Briefing | null }> =>
     fetch(`${BASE}/api/briefing/refresh`, { method: "POST" }).then((r) => {

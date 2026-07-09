@@ -13,23 +13,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api, BenchmarksResponse, Briefing, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, SleepDetail } from "@/lib/api";
+import { api, BenchmarksResponse, Briefing, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, SleepDetail, Workout } from "@/lib/api";
 import { BenchmarksView, SleepView, SleepTeaser, StandingTeaser } from "@/components/insights-views";
 import { CommandPalette } from "@/components/command-palette";
 
 /* ————— configuration ————— */
 
-const GROUP_ORDER = ["Recovery", "Activity", "Workouts", "Heart", "Vitals", "Body", "Sleep", "Other"];
-const GROUP_BLURB: Record<string, string> = {
-  Recovery: "The composite verdict — how much you have in the tank.",
-  Activity: "Movement, energy, and time on your feet.",
-  Workouts: "Logged sessions and what they cost.",
-  Heart: "Rhythm, variability, and recovery signals.",
-  Vitals: "Breath, blood, and the quiet numbers.",
-  Body: "Composition and measures.",
-  Sleep: "Nights — staged, scored, and read closely.",
-  Other: "Everything else the API surfaces.",
-};
+const GROUP_ORDER = ["Recovery", "Sleep", "Activity", "Workouts", "Heart", "Vitals", "Body", "Other"];
 
 // Curated set surfaced at the top (shown if they have data), in this order.
 const HIGHLIGHTS = [
@@ -315,6 +305,14 @@ function Ring({ score }: { score: number }) {
 // Interactive sparkline: hover reads out day · value without leaving the tile.
 function Spark({ points, unit }: { points: Point[]; unit: string }) {
   const [hover, setHover] = useState<number | null>(null);
+  // Once the draw-in animation has finished, drop it entirely. Safari restarts CSS
+  // animations when hover inserts the dot/tip siblings, which re-hides most of the
+  // line ("points but no line") — a .drawn line has no animation left to restart.
+  const [drawn, setDrawn] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setDrawn(true), 1400); // animation: 1s + 0.25s delay
+    return () => clearTimeout(t);
+  }, []);
   const vals = points.map((p) => p.value);
   const nums = vals.filter((v): v is number => v != null);
   if (nums.length < 2) return <div className="spark-empty" />;
@@ -338,13 +336,17 @@ function Spark({ points, unit }: { points: Point[]; unit: string }) {
         }}
         onPointerLeave={() => setHover(null)}
       >
-        <polyline className="line" pathLength={1} points={line} fill="none" stroke="currentColor"
+        <polyline className={`line${drawn ? " drawn" : ""}`} pathLength={1} points={line} fill="none" stroke="currentColor"
           strokeWidth={1.75} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
       </svg>
       {hover != null && hv != null && (
         <>
           <span className="spark-dot" style={{ left: `${xPct(hover)}%`, top: `${yPct(hv)}%` }} />
-          <span className="spark-tip">{fmtDay(points[hover].day)} · {formatNum(hv)}{unit ? ` ${unit}` : ""}</span>
+          {/* flip the readout to the far side of the spark so it never sits on the dot
+              or spills past the card edge at corner points */}
+          <span className={`spark-tip${xPct(hover) > 50 ? " flip" : ""}`}>
+            {fmtDay(points[hover].day)} · {formatNum(hv)}{unit ? ` ${unit}` : ""}
+          </span>
         </>
       )}
     </>
@@ -422,6 +424,188 @@ function SleepStages({ cache, nights = 14 }: { cache: Record<string, Point[]>; n
         ))}
       </div>
     </div>
+  );
+}
+
+/* ————— workouts view (weekly stats, volume, mix, month-grouped log) ————— */
+
+function WorkoutRow({ w, delay }: { w: Workout; delay: number }) {
+  return (
+    <div className="wlog-row rise" style={{ animationDelay: `${delay}ms` }}>
+      <span className="wlog-when">
+        {fmtDay(w.day)}
+        <span className="wlog-time">
+          {new Date(w.start_local).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+        </span>
+      </span>
+      <span className="wlog-what">{w.activity}</span>
+      <span className="wlog-stats">
+        {w.duration_min != null && <em>{formatNum(w.duration_min)}<i>min</i></em>}
+        {w.distance_km != null && <em>{formatNum(w.distance_km)}<i>km</i></em>}
+        {w.calories != null && <em>{formatNum(w.calories)}<i>kcal</i></em>}
+        {w.avg_hr != null && <em>{formatNum(w.avg_hr)}<i>bpm avg</i></em>}
+        {w.azm != null && w.azm > 0 && <em>{formatNum(w.azm)}<i>AZM</i></em>}
+      </span>
+    </div>
+  );
+}
+
+const PAGE = 12;
+
+function WorkoutsView({ cache }: { cache: Record<string, Point[]> }) {
+  const [items, setItems] = useState<Workout[] | null>(null);
+  const [shown, setShown] = useState(PAGE);
+  useEffect(() => {
+    api.workouts(365).then((r) => setItems(r.workouts)).catch(() => setItems([]));
+  }, []);
+
+  // This week vs the previous 7 days — volume you can feel.
+  const stats = useMemo(() => {
+    if (!items) return null;
+    const iso = (t: number) => new Date(t).toLocaleDateString("en-CA");
+    const cut7 = iso(Date.now() - 6 * 864e5);
+    const cut14 = iso(Date.now() - 13 * 864e5);
+    const sum = (ws: Workout[], f: (w: Workout) => number | null) =>
+      ws.reduce((a, w) => a + (f(w) ?? 0), 0);
+    const week = items.filter((w) => w.day >= cut7);
+    const prev = items.filter((w) => w.day >= cut14 && w.day < cut7);
+    const roll = (ws: Workout[]) => ({
+      n: ws.length,
+      min: sum(ws, (w) => w.duration_min),
+      kcal: sum(ws, (w) => w.calories),
+    });
+    return { week: roll(week), prev: roll(prev) };
+  }, [items]);
+
+  // Time by activity over the last 30 days.
+  const mix = useMemo(() => {
+    if (!items) return [];
+    const cut30 = new Date(Date.now() - 29 * 864e5).toLocaleDateString("en-CA");
+    const by = new Map<string, { min: number; n: number }>();
+    for (const w of items) {
+      if (w.day < cut30) continue;
+      const e = by.get(w.activity) ?? { min: 0, n: 0 };
+      e.min += w.duration_min ?? 0;
+      e.n += 1;
+      by.set(w.activity, e);
+    }
+    return [...by.entries()].map(([label, v]) => ({ label, ...v }))
+      .sort((a, b) => b.min - a.min).slice(0, 6);
+  }, [items]);
+
+  // Weekly workout volume (Mon-anchored) from the already-loaded daily series.
+  const weeks = useMemo(() => {
+    const bins = new Map<string, number>();
+    for (const p of (cache["exercise-minutes"] ?? []).slice(-63)) {
+      if (!p.day || p.value == null) continue;
+      const d = new Date(p.day + "T12:00:00");
+      const monday = new Date(d);
+      monday.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+      const key = monday.toLocaleDateString("en-CA");
+      bins.set(key, (bins.get(key) ?? 0) + p.value);
+    }
+    return [...bins.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-8)
+      .map(([x, y]) => ({ x, y }));
+  }, [cache]);
+
+  const delta = (cur: number, prev: number, unit: string) => {
+    const d = cur - prev;
+    if (Math.abs(d) < 0.5) return <span className="wk-delta">— level with last wk</span>;
+    return (
+      <span className={`wk-delta ${d > 0 ? "up" : "down"}`}>
+        {d > 0 ? "▲" : "▼"} {formatNum(Math.abs(d))}{unit} vs last wk
+      </span>
+    );
+  };
+
+  const maxWeek = Math.max(...weeks.map((w) => w.y), 1);
+  const maxMix = Math.max(...mix.map((m) => m.min), 1);
+  const list = items?.slice(0, shown) ?? [];
+  const thisYear = new Date().getFullYear();
+  let lastMonth = "";
+
+  return (
+    <section className="section rise" style={{ animationDelay: "40ms" }}>
+      <div className="sec-head">
+        <span className="sec-glyph"><Glyph name="Workouts" /></span>
+        <h2 className="sec-title">Workouts</h2>
+        {items != null && <span className="sec-count">{items.length} sessions</span>}
+      </div>
+      <hr className="sec-rule" />
+
+      {items != null && !items.length && (
+        <p className="muted">No sessions recorded yet — they&apos;ll appear after your next sync.</p>
+      )}
+
+      {stats && items!.length > 0 && (
+        <div className="statrow wk-stats">
+          <div className="stat"><div className="stat-k">This week</div>
+            <div className="stat-v">{stats.week.n}<span className="u">sessions</span></div>
+            {delta(stats.week.n, stats.prev.n, "")}</div>
+          <div className="stat"><div className="stat-k">Active time</div>
+            <div className="stat-v">{formatNum(stats.week.min)}<span className="u">min</span></div>
+            {delta(stats.week.min, stats.prev.min, " min")}</div>
+          <div className="stat"><div className="stat-k">Burned</div>
+            <div className="stat-v">{formatNum(stats.week.kcal)}<span className="u">kcal</span></div>
+            {delta(stats.week.kcal, stats.prev.kcal, " kcal")}</div>
+        </div>
+      )}
+
+      {(weeks.length >= 2 || mix.length > 0) && (
+        <div className="wk-cols">
+          {weeks.length >= 2 && (
+            <div className="wk-panel">
+              <p className="eyebrow">Weekly volume · min</p>
+              <div className="wk-bars">
+                {weeks.map((w) => (
+                  <div className="wk-bcol" key={w.x} title={`Week of ${fmtDay(w.x)} · ${formatNum(w.y)} min`}>
+                    <div className="wk-bar" style={{ height: `${(w.y / maxWeek) * 100}%` }} />
+                    <span className="wk-bx">{fmtDay(w.x)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {mix.length > 0 && (
+            <div className="wk-panel">
+              <p className="eyebrow">Last 30 days · by activity</p>
+              <div className="wk-mix">
+                {mix.map((m) => (
+                  <div className="wk-mrow" key={m.label}>
+                    <span className="wk-mlabel">{m.label}</span>
+                    <span className="cw-d-track">
+                      <span className="cw-d-fill" style={{ width: `${(m.min / maxMix) * 100}%`, background: "var(--lime)" }} />
+                    </span>
+                    <span className="wk-mval">{formatNum(m.min)}<i> min</i> · {m.n}×</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="wlog">
+        {list.map((w, i) => {
+          const d = new Date(w.day + "T12:00:00");
+          const month = d.toLocaleDateString(undefined, {
+            month: "long", ...(d.getFullYear() !== thisYear ? { year: "numeric" } : {}),
+          });
+          const head = month !== lastMonth ? (lastMonth = month) : null;
+          return (
+            <div key={w.id}>
+              {head && <p className="wlog-month">{head}</p>}
+              <WorkoutRow w={w} delay={Math.min(i % PAGE, PAGE) * 22} />
+            </div>
+          );
+        })}
+        {items != null && shown < items.length && (
+          <button className="btn wlog-morebtn" onClick={() => setShown((s) => s + PAGE)}>
+            Show {Math.min(PAGE, items.length - shown)} more · {items.length - shown} older
+          </button>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -751,7 +935,6 @@ function GoalsSection({
         {summary && summary.scored > 0 && <span className="sec-count">{summary.on_track}/{summary.scored} on track</span>}
         <button className="btn goals-new" onClick={() => setAdding((a) => !a)}>{adding ? "Close" : "+ New goal"}</button>
       </div>
-      <p className="sec-blurb">Targets you set — and whether you're getting there.</p>
       <hr className="sec-rule" />
 
       {adding && (
@@ -1248,6 +1431,7 @@ export default function Dashboard() {
     { id: "goals", label: "Goals" },
     ...(insights.length ? [{ id: "insights", label: "Insights" }] : []),
     ...(sleepDetail ? [{ id: "sleep", label: "Sleep" }] : []),
+    { id: "workouts", label: "Workouts" },
     ...(benchmarks ? [{ id: "standing", label: "Standing" }] : []),
     { id: "metrics", label: "Metrics" },
   ];
@@ -1548,7 +1732,6 @@ export default function Dashboard() {
                     <h2 className="sec-title">What we noticed</h2>
                     <span className="sec-count">{insights.length} signals</span>
                   </div>
-                  <p className="sec-blurb">Patterns pulled from your history — ranked by what matters most today.</p>
                   <hr className="sec-rule" />
                   <div className="insights-grid">
                     {insights.map((ins, i) => (
@@ -1563,6 +1746,9 @@ export default function Dashboard() {
           {/* ———— SLEEP deep-dive ———— */}
           {view === "sleep" && <SleepView data={sleepDetail} />}
 
+          {/* ———— WORKOUTS · individual sessions ———— */}
+          {view === "workouts" && <WorkoutsView cache={dailyCache} />}
+
           {/* ———— STANDING · peer benchmarks ———— */}
           {view === "standing" && <BenchmarksView data={benchmarks} />}
 
@@ -1575,8 +1761,10 @@ export default function Dashboard() {
                   <span className="sec-glyph"><Glyph name={g} /></span>
                   <h2 className="sec-title">{g}</h2>
                   <span className="sec-count">{live}/{gTypes.length} live</span>
+                  {g === "Workouts" && (
+                    <button className="btn goals-new" onClick={() => go("workouts")}>All sessions →</button>
+                  )}
                 </div>
-                <p className="sec-blurb">{GROUP_BLURB[g]}</p>
                 <hr className="sec-rule" />
                 {g === "Sleep" && <SleepStages cache={dailyCache} />}
                 <div className="tiles">

@@ -193,7 +193,9 @@ def _sync_exercise(client: HealthClient, today: date) -> TypeResult:
     session points, each carrying a `metricsSummary`."""
     result = TypeResult(data_type="exercise")
     try:
+        num = lambda v: float(v) if v not in (None, "") else None  # noqa: E731
         agg: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        sessions: list[dict] = []
         for p in client.list_all("exercise"):
             ex = p.get("exercise", {})
             iv = ex.get("interval", {})
@@ -206,6 +208,30 @@ def _sync_exercise(client: HealthClient, today: date) -> TypeResult:
             a["exercise-count"] += 1
             a["exercise-calories"] += float(ms.get("caloriesKcal") or 0)
             a["exercise-distance"] += float(ms.get("distanceMillimeters") or 0) / 1e6  # mm -> km
+
+            # Keep the individual session too — the workouts log renders these.
+            # activeDuration is a Duration string with fractional seconds ("2103.170s").
+            active_s = float((ex.get("activeDuration") or "0s").rstrip("s")) or _duration_s(
+                iv.get("startTime"), iv.get("endTime"))
+            start_local = (_parse_ts(iv["startTime"])
+                           + timedelta(seconds=_offset_seconds(iv.get("startUtcOffset")))
+                           ).replace(tzinfo=None).isoformat()
+            distance_km = (num(ms.get("distanceMillimeters")) or 0) / 1e6
+            sessions.append({
+                "id": p.get("name") or f"exercise/{iv['startTime']}",
+                "day": day, "start_ts": iv["startTime"], "start_local": start_local,
+                "end_ts": iv.get("endTime"),
+                "activity": ex.get("displayName")
+                            or (ex.get("exerciseType") or "Workout").replace("_", " ").title(),
+                "duration_min": round(active_s / 60.0, 1),
+                "calories": num(ms.get("caloriesKcal")),
+                "distance_km": round(distance_km, 3) if distance_km > 0 else None,
+                # steps arrive as strings, sometimes fractional ("2103.170")
+                "steps": int(float(ms["steps"])) if ms.get("steps") else None,
+                "avg_hr": num(ms.get("averageHeartRateBeatsPerMinute")),
+                "azm": num(ms.get("activeZoneMinutes")),
+                "raw": json.dumps(p),
+            })
         rows = 0
         for metric, unit in (
             ("exercise-minutes", "min"), ("exercise-count", "sessions"),
@@ -213,6 +239,7 @@ def _sync_exercise(client: HealthClient, today: date) -> TypeResult:
         ):
             rows += store.upsert_daily_values(metric, unit, {d: agg[d][metric] for d in agg})
         result.daily_rows = rows
+        result.intraday_rows = store.upsert_workouts(sessions)  # session-level detail
         store.set_watermark("exercise", "daily", today)
     except Exception as exc:
         result.error = f"{type(exc).__name__}: {exc}"

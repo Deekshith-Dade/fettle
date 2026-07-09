@@ -456,10 +456,7 @@ export default function CoachChat() {
               <div className="coach-hello">
                 <span className="hello-mark" aria-hidden>✦</span>
                 <h2>Your data, <em>on the record.</em></h2>
-                <p>
-                  Ask anything about your training, sleep, and recovery. Every answer is
-                  pulled live from your synced metrics — numbers first, never vibes.
-                </p>
+                <p>Ask anything about your training, sleep, and recovery.</p>
                 <div className="suggest-grid">
                   {SUGGESTIONS.map((s) => (
                     <button className="suggest-card" key={s.q} onClick={() => send(s.q)}>

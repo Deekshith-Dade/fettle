@@ -120,10 +120,6 @@ export function BenchmarksView({ data }: { data: BenchmarksResponse | null }) {
         <h2 className="sec-title">Where you stand</h2>
         <span className="sec-count">{data.cohort}</span>
       </div>
-      <p className="sec-blurb">
-        Your habitual values against evidence-based reference norms — orientation and a next rung
-        to reach for, not a verdict. Ordered with your biggest opportunities first.
-      </p>
       <hr className="sec-rule" />
       <div className="bm-grid">
         {data.benchmarks.map((b) => <BenchmarkRow key={b.key} b={b} />)}
@@ -189,7 +185,6 @@ export function SleepView({ data }: { data: SleepDetail | null }) {
         <h2 className="sec-title">Sleep</h2>
         <span className="sec-count">{data.nights.length} nights</span>
       </div>
-      <p className="sec-blurb">Last night in full, how your stage mix compares to what a body needs, and where the week is heading.</p>
       <hr className="sec-rule" />
 
       {/* last night hero */}

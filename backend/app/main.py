@@ -211,6 +211,12 @@ def daily_bulk() -> dict:
     return {"series": store.query_daily_bulk()}
 
 
+@app.get("/api/workouts")
+def workouts(days: int = Query(default=90, ge=1, le=365)) -> dict:
+    """Individual exercise sessions, newest first (the exercise-* dailies aggregate these)."""
+    return {"workouts": store.query_workouts(days=days)}
+
+
 def _require_type(name: str):
     dt = REGISTRY_BY_NAME.get(name)
     if not dt:
