@@ -13,7 +13,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation } from "@/lib/api";
+import { api, BenchmarksResponse, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, SleepDetail } from "@/lib/api";
+import { BenchmarksView, SleepView } from "@/components/insights-views";
 
 /* ————— configuration ————— */
 
@@ -1024,6 +1025,8 @@ export default function Dashboard() {
   const [coachRecs, setCoachRecs] = useState<Recommendation[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [goalsSummary, setGoalsSummary] = useState<GoalsResponse["summary"] | null>(null);
+  const [benchmarks, setBenchmarks] = useState<BenchmarksResponse | null>(null);
+  const [sleepDetail, setSleepDetail] = useState<SleepDetail | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function loadGoals() {
@@ -1048,18 +1051,22 @@ export default function Dashboard() {
         const h = await api.health();
         setAuthed(h.authenticated);
         setTokenDays(h.token_days_left);
-        const [dts, bulk, r, ins, rec] = await Promise.all([
+        const [dts, bulk, r, ins, rec, bm, sd] = await Promise.all([
           api.dataTypes(),
           api.dailyBulk(),
           api.readiness().catch(() => null),
           api.insights().then((x) => x.insights).catch(() => []),
           api.coach().then((x) => x.recommendations).catch(() => []),
+          api.benchmarks().catch(() => null),
+          api.sleepDetail().catch(() => null),
         ]);
         setTypes(dts);
         setDailyCache(bulk.series);
         setReadiness(r);
         setInsights(ins);
         setCoachRecs(rec);
+        setBenchmarks(bm);
+        setSleepDetail(sd);
         loadGoals();
         refreshSyncMeta();
       } catch (e) {
@@ -1159,17 +1166,21 @@ export default function Dashboard() {
         if (flashTimer.current) clearTimeout(flashTimer.current);
         flashTimer.current = setTimeout(() => setSyncFlash(null), 5000);
       }
-      const [bulk, r, ins, rec] = await Promise.all([
+      const [bulk, r, ins, rec, bm, sd] = await Promise.all([
         api.dailyBulk(),
         api.readiness().catch(() => null),
         api.insights().then((x) => x.insights).catch(() => []),
         api.coach().then((x) => x.recommendations).catch(() => []),
+        api.benchmarks().catch(() => null),
+        api.sleepDetail().catch(() => null),
       ]);
       setDailyCache(bulk.series);
       setIntradayCache({});
       setReadiness(r);
       setInsights(ins);
       setCoachRecs(rec);
+      setBenchmarks(bm);
+      setSleepDetail(sd);
       loadGoals();
       refreshSyncMeta();
     } catch (e) {
@@ -1182,6 +1193,8 @@ export default function Dashboard() {
   const openInfo = open ? infoByName[open] : null;
   const tabs = [
     { id: "overview", label: "Overview" },
+    ...(sleepDetail ? [{ id: "sleep", label: "Sleep" }] : []),
+    ...(benchmarks ? [{ id: "standing", label: "Standing" }] : []),
     { id: "goals", label: "Goals" },
     ...(insights.length ? [{ id: "insights", label: "Insights" }] : []),
     { id: "metrics", label: "Metrics" },
@@ -1390,6 +1403,12 @@ export default function Dashboard() {
               </div>
             </section>
           )}
+
+          {/* ———— SLEEP deep-dive ———— */}
+          {view === "sleep" && <SleepView data={sleepDetail} />}
+
+          {/* ———— STANDING · peer benchmarks ———— */}
+          {view === "standing" && <BenchmarksView data={benchmarks} />}
 
           {/* ———— METRICS · all focus areas ———— */}
           {view === "metrics" && groups.map(([g, gTypes], gi) => {

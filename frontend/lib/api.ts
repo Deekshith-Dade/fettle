@@ -66,6 +66,42 @@ export type Insight = {
   gauge?: { value: number; zones: number[]; max: number };
 };
 
+// --- peer benchmarks ---
+export type BenchmarkBand = {
+  name: string; lo: number; hi: number; tone: string; start: number; end: number;
+};
+export type Benchmark = {
+  key: string; label: string; unit: string; better: "up" | "down" | "range";
+  value: number; tier: string; tone: string; scale: [number, number]; position: number;
+  bands: BenchmarkBand[];
+  target: { label: string; value: number; comparator: "gte" | "lte" } | null;
+  basis: string; caveat: string;
+};
+export type BenchmarksResponse = { as_of: string | null; cohort: string; benchmarks: Benchmark[] };
+
+// --- sleep deep-dive ---
+export type SleepStageTarget = {
+  key: string; label: string; pct: number; target_lo: number; target_hi: number;
+  tone: string; note: string;
+};
+export type SleepNight = {
+  day: string; duration: number | null; score: number | null; efficiency: number | null;
+  deep: number | null; rem: number | null; light: number | null; awake: number | null;
+};
+export type SleepDetail = {
+  as_of: string; need_hours: number;
+  last_night: {
+    day: string; duration: number | null; efficiency: number | null; score: number | null;
+    stages: Record<string, number | null>; stage_pct: Record<string, number>;
+  };
+  averages: Record<string, number | null>;
+  stage_targets: SleepStageTarget[];
+  debt: { hours: number; nights: number; tone: string; need: number; message: string };
+  regularity: { std: number; nights: number; tone: string; message: string };
+  trend: { metric: string; direction: string; change: number; tone: string; nights: number };
+  nights: SleepNight[];
+};
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
@@ -116,6 +152,8 @@ export const api = {
     }>("/api/readiness"),
   insights: () => get<{ insights: Insight[] }>("/api/insights"),
   coach: () => get<CoachResponse>("/api/coach"),
+  benchmarks: () => get<BenchmarksResponse>("/api/benchmarks"),
+  sleepDetail: () => get<SleepDetail>("/api/sleep/detail"),
   goals: () => get<GoalsResponse>("/api/goals"),
   createGoal: (body: { data_type: string; comparator: "gte" | "lte"; target: number }) =>
     fetch(`${BASE}/api/goals`, {

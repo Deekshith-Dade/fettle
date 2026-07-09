@@ -20,3 +20,6 @@ npm-debug.log*
 
 # Local Claude Code state (settings, locks)
 .claude/
+
+# TypeScript incremental build cache
+frontend/tsconfig.tsbuildinfo

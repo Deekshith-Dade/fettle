@@ -9,7 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
-from . import auth, coach, config, goals, insights, readiness, store, sync
+from . import (
+    auth, benchmarks, coach, config, goals, insights, readiness,
+    sleep_analysis, store, sync,
+)
 from .config import REGISTRY, REGISTRY_BY_NAME, settings
 
 # Ensure the schema exists as soon as the module is imported (covers TestClient,
@@ -124,6 +127,21 @@ def insights_feed(limit: int = Query(default=8, ge=1, le=20)) -> dict:
 def coach_today(limit: int = Query(default=3, ge=1, le=5)) -> dict:
     """Ranked 'what to do today' recommendations synthesised from the current state."""
     return coach.recommend(limit=limit)
+
+
+@app.get("/api/benchmarks")
+def benchmarks_standing() -> dict:
+    """Where the user's habitual values stand against evidence-based reference norms."""
+    return benchmarks.evaluate_all()
+
+
+@app.get("/api/sleep/detail")
+def sleep_detail() -> dict:
+    """Deep-dive on sleep: stage mix vs targets, debt, regularity, and trend."""
+    data = sleep_analysis.detail()
+    if data is None:
+        raise HTTPException(404, "Not enough sleep data yet.")
+    return data
 
 
 # --- goals -------------------------------------------------------------------
