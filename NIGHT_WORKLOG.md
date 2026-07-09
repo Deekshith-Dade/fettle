@@ -7,6 +7,47 @@ Working autonomously while you sleep. This file is my running narrative + durabl
 
 ---
 
+## ☀️ Good morning — start here
+
+**Everything is live right now at http://localhost:3400** (I left both dev servers running).
+It's all on the branch **`feature/health-insights`** — your `main` is untouched.
+
+**What's new to explore, in order:**
+1. **Theme toggle** — top-left icon in the header. Cycles **System → Light → Dark**. You asked
+   for auto+toggle; dark is still the default so nothing you love changed. *Please eyeball light
+   mode* — I built it carefully but couldn't see it (your Chrome extension wasn't connected, so I
+   had no screenshots tonight; I verified everything via type-checks, clean compiles, and by
+   curling every endpoint against your real data).
+2. **Sleep tab** — a real deep-dive: last night in full, your **stage mix vs. evidence-based
+   targets**, sleep debt, consistency, and trend.
+3. **Standing tab** — **where you stand vs. mid-20s-male norms**, biggest opportunities first,
+   each with a next rung to reach for.
+4. **Overview** now flows: readiness → focus → at-a-glance → *last night's sleep* → *where you
+   stand* → goals → insights. Each new block invites you deeper.
+5. **Insights tab** — the correlation engine is smarter and more honest now (see findings below).
+
+**What your data actually said tonight** (real numbers, honestly framed):
+- **Resting HR ~74 bpm → "average."** Clear room toward "excellent" (≤66) via cardio fitness.
+- **Steps ~6,160/day → "low active."** Next rung 7,500. Your single biggest lever.
+- **Sleep: REM runs a touch low (18% vs 20–25%), light high (61% vs 50–60%);** ~24h of debt over
+  14 nights from several very short nights — **but the trend is rising and last night scored 100.**
+- **Heavier training → lower next-day readiness** (r −0.49) and **rest → higher readiness** (r +0.34).
+  Real recovery signal. Weak/spurious links did *not* surface — the engine won't lie to you.
+- Wins to keep: HRV "strong," sleep efficiency "good," breathing/SpO2 healthy, BMI healthy,
+  active-minutes meets the WHO guideline.
+
+**If you love it:** `git checkout main && git merge feature/health-insights`
+**If a server stopped:** backend → `cd backend && .venv/bin/uvicorn app.main:app --host :: --port 8400`;
+frontend → `cd frontend && npm run dev -- -p 3400`.
+
+**The evidence base** behind every threshold lives in `docs/health-metrics-spec.md` (fully cited).
+**Recommended next** (didn't want to rush unverified UI): a dedicated Trends/correlations *explorer*
+view; readiness upgrades the research flagged (illness "≥2 vitals out of range" flag, HRV
+parasympathetic-saturation guard, add respiratory rate); bedtime-*timing* regularity (needs sleep
+session timestamps stored); and VO2max/body benchmarks once that data syncs.
+
+---
+
 ## The mission (your words, distilled)
 Go deep on the science, get inspired by Whoop / Oura / Bevel / Apple Health, and use *my
 actual data* to help me understand myself and grow — starting from "perfect information."
