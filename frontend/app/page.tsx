@@ -14,7 +14,7 @@ import {
   YAxis,
 } from "recharts";
 import { api, BenchmarksResponse, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, SleepDetail } from "@/lib/api";
-import { BenchmarksView, SleepView } from "@/components/insights-views";
+import { BenchmarksView, SleepView, SleepTeaser, StandingTeaser } from "@/components/insights-views";
 
 /* ————— configuration ————— */
 
@@ -1394,6 +1394,9 @@ export default function Dashboard() {
                   </div>
                 </section>
               )}
+
+              {sleepDetail && <SleepTeaser data={sleepDetail} onOpen={() => go("sleep")} />}
+              {benchmarks && <StandingTeaser data={benchmarks} onOpen={() => go("standing")} />}
 
               <GoalsSection
                 goals={goals} summary={goalsSummary} types={types} dailyCache={dailyCache}

@@ -724,3 +724,25 @@ body::before {
 @media (max-width: 760px) {
   .sleep-hero { grid-template-columns: 1fr; gap: 22px; }
 }
+
+/* overview teasers */
+.teaser-sleep { display: grid; grid-template-columns: auto 1fr; gap: 30px; align-items: center; }
+.teaser-sleep-lead { display: flex; flex-direction: column; gap: 8px; }
+.teaser-sleep-val { font-family: var(--font-display); font-size: 46px; font-weight: 380; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 5px; }
+.teaser-sleep-val .u { font-family: var(--font-body); font-size: 14px; color: var(--faint); }
+.teaser-sleep-meta { display: flex; gap: 16px; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; }
+.teaser-sleep-meta b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.teaser-sleep-right { display: flex; flex-direction: column; gap: 11px; min-width: 0; }
+.teaser-sleep-right .stagebar { height: 16px; }
+.teaser-sleep-note { font-size: 12.5px; margin: 0; line-height: 1.45; }
+
+.teaser-standing { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 30px; }
+.teaser-bm-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+.teaser-bm-label { font-size: 13px; color: var(--muted); }
+.teaser-bm-label b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.teaser-bm-tier { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600; white-space: nowrap; }
+
+@media (max-width: 680px) {
+  .teaser-sleep { grid-template-columns: 1fr; gap: 18px; }
+  .teaser-standing { grid-template-columns: 1fr; }
+}

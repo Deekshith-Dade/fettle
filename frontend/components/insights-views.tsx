@@ -14,6 +14,17 @@ import {
 } from "recharts";
 import type { Benchmark, BenchmarksResponse, SleepDetail } from "@/lib/api";
 
+const MoonGlyph = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M19.5 14.5A8 8 0 0 1 9.5 4.3 8 8 0 1 0 19.5 14.5z" />
+  </svg>
+);
+const BarsGlyph = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M4 20V6M9 20V10M14 20v-7M19 20V4" />
+  </svg>
+);
+
 /* ————— shared bits ————— */
 
 // Tones map to the existing signal tokens, so both themes adapt for free.
@@ -105,11 +116,7 @@ export function BenchmarksView({ data }: { data: BenchmarksResponse | null }) {
   return (
     <section className="section rise" style={{ animationDelay: "40ms" }}>
       <div className="sec-head">
-        <span className="sec-glyph">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
-            <path d="M4 20V6M9 20V10M14 20v-7M19 20V4" />
-          </svg>
-        </span>
+        <span className="sec-glyph"><BarsGlyph /></span>
         <h2 className="sec-title">Where you stand</h2>
         <span className="sec-count">{data.cohort}</span>
       </div>
@@ -178,11 +185,7 @@ export function SleepView({ data }: { data: SleepDetail | null }) {
   return (
     <section className="section rise" style={{ animationDelay: "40ms" }}>
       <div className="sec-head">
-        <span className="sec-glyph">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
-            <path d="M19.5 14.5A8 8 0 0 1 9.5 4.3 8 8 0 1 0 19.5 14.5z" />
-          </svg>
-        </span>
+        <span className="sec-glyph"><MoonGlyph /></span>
         <h2 className="sec-title">Sleep</h2>
         <span className="sec-count">{data.nights.length} nights</span>
       </div>
@@ -301,6 +304,79 @@ export function SleepView({ data }: { data: SleepDetail | null }) {
             strokeWidth={2} connectNulls dot={false} isAnimationActive={false} />
         </AreaChart>
       </ResponsiveContainer>
+    </section>
+  );
+}
+
+/* ————— overview teasers (invite you into the full views) ————— */
+
+export function SleepTeaser({ data, onOpen }: { data: SleepDetail | null; onOpen: () => void }) {
+  if (!data) return null;
+  const ln = data.last_night;
+  const total = ["deep", "rem", "light", "awake"].reduce((t, k) => t + (ln.stages[k] ?? 0), 0);
+  return (
+    <section className="section rise" style={{ animationDelay: "100ms" }}>
+      <div className="sec-head">
+        <span className="sec-glyph"><MoonGlyph /></span>
+        <h2 className="sec-title">Sleep</h2>
+        <span className="sec-count">last night</span>
+        <button className="btn goals-new" onClick={onOpen}>Deep dive →</button>
+      </div>
+      <hr className="sec-rule" />
+      <div className="teaser-sleep">
+        <div className="teaser-sleep-lead">
+          <div className="teaser-sleep-val">{fmt(ln.duration)}<span className="u">h</span></div>
+          <div className="teaser-sleep-meta">
+            <span>Score <b>{fmt(ln.score)}</b></span>
+            <span>{fmt(ln.efficiency)}% efficiency</span>
+          </div>
+        </div>
+        <div className="teaser-sleep-right">
+          <div className="stagebar">
+            {STAGES.map((s) => {
+              const h = ln.stages[s.key] ?? 0;
+              if (!h || !total) return null;
+              return <span key={s.key} className="stagebar-seg" style={{ flexGrow: h, background: s.color }} title={`${s.label} ${fmt(h)}h`} />;
+            })}
+          </div>
+          <p className="teaser-sleep-note" style={{ color: toneColor(data.debt.tone) }}>{data.debt.message}</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function StandingTeaser({ data, onOpen }: { data: BenchmarksResponse | null; onOpen: () => void }) {
+  if (!data || !data.benchmarks.length) return null;
+  const top = data.benchmarks[0]; // biggest opportunity (backend sorts opportunity-first)
+  const win = [...data.benchmarks].reverse().find((b) => ["good", "optimal", "healthy"].includes(b.tone) && b.key !== top.key);
+  const items = [top, win].filter((b): b is Benchmark => !!b);
+  return (
+    <section className="section rise" style={{ animationDelay: "120ms" }}>
+      <div className="sec-head">
+        <span className="sec-glyph"><BarsGlyph /></span>
+        <h2 className="sec-title">Where you stand</h2>
+        <span className="sec-count">{data.benchmarks.length} measures</span>
+        <button className="btn goals-new" onClick={onOpen}>See all →</button>
+      </div>
+      <hr className="sec-rule" />
+      <div className="teaser-standing">
+        {items.map((b) => {
+          const [lo, hi] = b.scale;
+          const targetPos = b.target ? ((b.target.value - lo) / (hi - lo)) * 100 : null;
+          return (
+            <div className="teaser-bm" key={b.key}>
+              <div className="teaser-bm-top">
+                <span className="teaser-bm-label">{b.label} · <b>{fmt(b.value)}{b.unit ? ` ${b.unit}` : ""}</b></span>
+                <span className="teaser-bm-tier" style={{ color: toneColor(b.tone) }}>{b.tier}</span>
+              </div>
+              <ScaleBar
+                segments={b.bands.map((bd) => ({ left: bd.start, width: Math.max(0, bd.end - bd.start), tone: bd.tone, solid: bd.tone === b.tone }))}
+                markerPos={b.position} markerTone={b.tone} targetPos={targetPos} height={10} />
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }
