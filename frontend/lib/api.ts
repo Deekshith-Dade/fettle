@@ -57,13 +57,23 @@ export type CoachResponse = { date: string; recommendations: Recommendation[] };
 
 export type Insight = {
   id: string;
-  kind: "trend" | "anomaly" | "record" | "streak" | "load" | "sleep_debt" | "correlation";
+  kind: "trend" | "anomaly" | "record" | "streak" | "load" | "sleep_debt" | "correlation" | "llm";
   sentiment: "good" | "watch" | "bad" | "info";
   title: string;
   detail: string;
   metric?: string;
   priority: number;
   gauge?: { value: number; zones: number[]; max: number };
+};
+
+/** LLM-synthesized daily briefing over the computed insight evidence. */
+export type Briefing = {
+  day: string;
+  generated_at: string;
+  model: string | null;
+  headline: string;
+  narrative: string;
+  insights: Insight[];
 };
 
 // --- peer benchmarks ---
@@ -151,6 +161,12 @@ export const api = {
       }[];
     }>("/api/readiness"),
   insights: () => get<{ insights: Insight[] }>("/api/insights"),
+  briefing: () => get<{ briefing: Briefing | null }>("/api/briefing"),
+  refreshBriefing: (): Promise<{ briefing: Briefing | null }> =>
+    fetch(`${BASE}/api/briefing/refresh`, { method: "POST" }).then((r) => {
+      if (!r.ok) throw new Error(`briefing refresh -> ${r.status}`);
+      return r.json();
+    }),
   coach: () => get<CoachResponse>("/api/coach"),
   benchmarks: () => get<BenchmarksResponse>("/api/benchmarks"),
   sleepDetail: () => get<SleepDetail>("/api/sleep/detail"),
@@ -170,3 +186,115 @@ export const api = {
   deleteGoal: (id: number) =>
     fetch(`${BASE}/api/goals/${id}`, { method: "DELETE" }).then((r) => r.json()),
 };
+
+// --- AI coach chat -------------------------------------------------------------
+
+export type ChatModel = { id: string; label: string; recommended: boolean };
+export type ChatToolCall = { name: string; label: string; input?: Record<string, unknown> };
+export type ChatAttachment = { id: string; name: string };
+/** A show_* tool call the coach made — the UI mounts the matching live widget. */
+export type ChatWidgetSpec = { kind: string; params?: Record<string, unknown> };
+/** Ordered answer content: prose interleaved with inline widgets. */
+export type ChatBlock =
+  | { type: "text"; text: string }
+  | { type: "widget"; widget: ChatWidgetSpec };
+
+export type Conversation = {
+  id: number;
+  title: string;
+  model: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ChatMessage = {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  parts?: {
+    tools?: ChatToolCall[];
+    blocks?: ChatBlock[];
+    attachments?: { name: string }[];
+    model?: string;
+    tokens?: number;
+  } | null;
+  created_at: string;
+};
+
+/** Handlers for the SSE events a chat turn streams back. */
+export type ChatEvents = {
+  meta?: (m: { conversation_id: number; title: string; model: string }) => void;
+  tool?: (t: ChatToolCall) => void;
+  widget?: (w: ChatWidgetSpec) => void;
+  text?: (t: { text: string }) => void;
+  done?: (d: { message_id: number; tokens: number; model: string }) => void;
+  error?: (e: { message: string }) => void;
+};
+
+export const chatApi = {
+  models: () => get<ChatModel[]>("/api/chat/models"),
+  conversations: () => get<Conversation[]>("/api/chat/conversations"),
+  conversation: (id: number) =>
+    get<Conversation & { messages: ChatMessage[] }>(`/api/chat/conversations/${id}`),
+  rename: (id: number, title: string) =>
+    fetch(`${BASE}/api/chat/conversations/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    }).then((r) => r.json()),
+  remove: (id: number) =>
+    fetch(`${BASE}/api/chat/conversations/${id}`, { method: "DELETE" }).then((r) => r.json()),
+  upload: async (file: File): Promise<ChatAttachment> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`${BASE}/api/chat/attachments`, { method: "POST", body: fd });
+    if (!res.ok) throw new Error(`upload failed (${res.status})`);
+    return res.json();
+  },
+};
+
+/** POST a message and dispatch the SSE stream to `on.*` until the turn ends. */
+export async function streamChat(
+  body: {
+    message: string;
+    conversation_id?: number | null;
+    model?: string;
+    attachments?: ChatAttachment[];
+  },
+  on: ChatEvents,
+  signal?: AbortSignal
+): Promise<void> {
+  const res = await fetch(`${BASE}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok || !res.body) throw new Error(`/api/chat -> ${res.status}`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let sep: number;
+    while ((sep = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, sep);
+      buf = buf.slice(sep + 2);
+      let event = "";
+      let data = "";
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event: ")) event = line.slice(7).trim();
+        else if (line.startsWith("data: ")) data += line.slice(6);
+      }
+      if (!event || !data) continue;
+      try {
+        const payload = JSON.parse(data);
+        (on as Record<string, ((p: unknown) => void) | undefined>)[event]?.(payload);
+      } catch {
+        /* malformed block — skip */
+      }
+    }
+  }
+}

@@ -46,6 +46,17 @@ def cmd_sync(names: list[str]) -> int:
         else:
             print(f"  ✓ {r.data_type}: {r.daily_rows} daily, {r.intraday_rows} intraday")
     print(f"\nDone. {report.total_rows} rows total. ok={report.ok}")
+
+    # Refresh the LLM daily briefing off the fresh data — best-effort: the sync's
+    # success must never depend on the model being reachable.
+    try:
+        from app import briefing
+        b = briefing.generate()
+        if b:
+            print(f"Briefing: {b['headline']}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  (briefing skipped: {exc})", file=sys.stderr)
+
     return 0 if report.ok else 1
 
 

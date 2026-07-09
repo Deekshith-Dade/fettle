@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 from . import (
-    auth, benchmarks, coach, config, goals, insights, readiness,
+    auth, benchmarks, briefing, chat, coach, config, goals, insights, readiness,
     sleep_analysis, store, sync,
 )
 from .config import REGISTRY, REGISTRY_BY_NAME, settings
@@ -33,6 +33,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(chat.router)  # AI coach: /api/chat*
 
 
 @app.get("/api/health")
@@ -121,6 +122,21 @@ def readiness_today() -> dict:
 def insights_feed(limit: int = Query(default=8, ge=1, le=20)) -> dict:
     """Ranked plain-English observations derived from the stored series."""
     return {"insights": insights.compute(limit=limit)}
+
+
+@app.get("/api/briefing")
+def briefing_latest() -> dict:
+    """The stored LLM daily briefing — instant read, generated post-sync/on demand."""
+    return {"briefing": briefing.latest()}
+
+
+@app.post("/api/briefing/refresh")
+def briefing_refresh() -> dict:
+    """Regenerate the briefing now (sync def → runs in the threadpool; takes ~20-60s)."""
+    try:
+        return {"briefing": briefing.generate(force=True)}
+    except briefing.BriefingError as exc:
+        raise HTTPException(502, f"Briefing generation failed: {exc}")
 
 
 @app.get("/api/coach")

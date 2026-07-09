@@ -3,11 +3,13 @@ backend/credentials.json
 backend/token.json
 backend/*.db
 backend/.env
+backend/uploads/
 
 # Python
 __pycache__/
 *.py[cod]
 .venv/
+.venv-mcp/
 venv/
 *.egg-info/
 

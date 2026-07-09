@@ -13,7 +13,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api, BenchmarksResponse, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, SleepDetail } from "@/lib/api";
+import { api, BenchmarksResponse, Briefing, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, SleepDetail } from "@/lib/api";
 import { BenchmarksView, SleepView, SleepTeaser, StandingTeaser } from "@/components/insights-views";
 import { CommandPalette } from "@/components/command-palette";
 
@@ -128,6 +128,8 @@ const INSIGHT_PATHS: Record<Insight["kind"], React.ReactNode> = {
   load: <><path d="M4.5 15.5a7.5 7.5 0 1 1 15 0" /><path d="M12 15.5l4-3" /></>,
   sleep_debt: <path d="M19.5 14.5A8 8 0 0 1 9.5 4.3 8 8 0 1 0 19.5 14.5z" />,
   correlation: <><circle cx="7" cy="17" r="1.4" fill="currentColor" stroke="none" /><circle cx="12" cy="12.5" r="1.4" fill="currentColor" stroke="none" /><circle cx="17" cy="7" r="1.4" fill="currentColor" stroke="none" /><path d="M5 19.5L19 5" strokeDasharray="2 2.5" /></>,
+  // LLM-synthesized briefing card — a four-point star, the coach's mark.
+  llm: <path d="M12 3.5l2 6.5 6.5 2-6.5 2-2 6.5-2-6.5L3.5 12l6.5-2z" />,
 };
 
 function InsightCard({ ins, onOpen, delay }: { ins: Insight; onOpen: (m: string) => void; delay: number }) {
@@ -1221,6 +1223,24 @@ export default function Dashboard() {
     }
   }
 
+  // LLM daily briefing — read instantly from the store; regenerated post-sync/on demand.
+  const [briefingData, setBriefingData] = useState<Briefing | null>(null);
+  const [briefingBusy, setBriefingBusy] = useState(false);
+  useEffect(() => {
+    api.briefing().then((r) => setBriefingData(r.briefing)).catch(() => {});
+  }, []);
+  async function refreshBriefing() {
+    setBriefingBusy(true);
+    try {
+      const r = await api.refreshBriefing();
+      setBriefingData(r.briefing);
+    } catch {
+      /* keep the stored briefing; the stale timestamp tells the story */
+    } finally {
+      setBriefingBusy(false);
+    }
+  }
+
   const openInfo = open ? infoByName[open] : null;
   const tabs = [
     { id: "overview", label: "Overview" },
@@ -1386,6 +1406,9 @@ export default function Dashboard() {
                 {t.label}
               </button>
             ))}
+            <a className="chip chip-coach" href="/coach" title="Ask your data anything">
+              Coach<span className="coach-star" aria-hidden>✦</span>
+            </a>
           </nav>
 
           {/* ———— OVERVIEW · readiness hero ———— */}
@@ -1489,21 +1512,50 @@ export default function Dashboard() {
           )}
 
           {/* ———— INSIGHTS ———— */}
-          {view === "insights" && insights.length > 0 && (
-            <section className="section rise" style={{ animationDelay: "40ms" }}>
-              <div className="sec-head">
-                <span className="sec-glyph"><Glyph name="Recovery" /></span>
-                <h2 className="sec-title">What we noticed</h2>
-                <span className="sec-count">{insights.length} signals</span>
-              </div>
-              <p className="sec-blurb">Patterns pulled from your history — ranked by what matters most today.</p>
-              <hr className="sec-rule" />
-              <div className="insights-grid">
-                {insights.map((ins, i) => (
-                  <InsightCard key={ins.id} ins={ins} onOpen={setOpen} delay={40 + i * 40} />
-                ))}
-              </div>
-            </section>
+          {view === "insights" && (
+            <>
+              {briefingData && (
+                <section className="briefing rise" style={{ animationDelay: "20ms" }}>
+                  <div className="briefing-head">
+                    <p className="eyebrow briefing-eyebrow">
+                      <span className="briefing-star" aria-hidden>✦</span> Today&apos;s read
+                    </p>
+                    <button className="btn briefing-refresh" onClick={refreshBriefing} disabled={briefingBusy}>
+                      {briefingBusy && <span className="spinner" aria-hidden />}
+                      {briefingBusy ? "Reading your data…" : "Refresh"}
+                    </button>
+                  </div>
+                  <h2 className="briefing-headline">{briefingData.headline}</h2>
+                  <p className="briefing-narrative">{briefingData.narrative}</p>
+                  <div className="insights-grid">
+                    {briefingData.insights.map((ins, i) => (
+                      <InsightCard key={ins.id} ins={ins} onOpen={setOpen} delay={60 + i * 45} />
+                    ))}
+                  </div>
+                  <p className="briefing-meta">
+                    Synthesized from the computed signals below · {briefingData.model?.split("/").pop() ?? "llm"} ·
+                    updated {new Date(briefingData.generated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                </section>
+              )}
+
+              {insights.length > 0 && (
+                <section className="section rise" style={{ animationDelay: "40ms" }}>
+                  <div className="sec-head">
+                    <span className="sec-glyph"><Glyph name="Recovery" /></span>
+                    <h2 className="sec-title">What we noticed</h2>
+                    <span className="sec-count">{insights.length} signals</span>
+                  </div>
+                  <p className="sec-blurb">Patterns pulled from your history — ranked by what matters most today.</p>
+                  <hr className="sec-rule" />
+                  <div className="insights-grid">
+                    {insights.map((ins, i) => (
+                      <InsightCard key={ins.id} ins={ins} onOpen={setOpen} delay={40 + i * 40} />
+                    ))}
+                  </div>
+                </section>
+              )}
+            </>
           )}
 
           {/* ———— SLEEP deep-dive ———— */}
@@ -1558,9 +1610,9 @@ export default function Dashboard() {
         onClose={() => setPaletteOpen(false)}
         types={types}
         dailyCache={dailyCache}
-        tabs={tabs}
+        tabs={[...tabs, { id: "coach", label: "Coach — ask your data" }]}
         onOpenMetric={(name) => setOpen(name)}
-        onGoView={(id) => go(id)}
+        onGoView={(id) => (id === "coach" ? window.location.assign("/coach") : go(id))}
       />
     </div>
   );

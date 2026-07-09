@@ -75,7 +75,7 @@ function ScaleBar({
 
 /* ————— benchmarks ————— */
 
-function BenchmarkRow({ b }: { b: Benchmark }) {
+export function BenchmarkRow({ b }: { b: Benchmark }) {
   const [lo, hi] = b.scale;
   const targetPos = b.target ? ((b.target.value - lo) / (hi - lo)) * 100 : null;
   const segments = b.bands.map((band) => ({

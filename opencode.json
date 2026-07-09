@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "fitbit": {
+      "type": "local",
+      "command": [
+        "/Users/deekshith/Documents/Projects/agents/claude-agents/fitbit-plus/backend/.venv-mcp/bin/python",
+        "/Users/deekshith/Documents/Projects/agents/claude-agents/fitbit-plus/backend/mcp_server.py"
+      ],
+      "enabled": true
+    }
+  }
+}
