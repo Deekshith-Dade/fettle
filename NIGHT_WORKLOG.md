@@ -33,6 +33,9 @@ It's all on the branch **`feature/health-insights`** — your `main` is untouche
   14 nights from several very short nights — **but the trend is rising and last night scored 100.**
 - **Heavier training → lower next-day readiness** (r −0.49) and **rest → higher readiness** (r +0.34).
   Real recovery signal. Weak/spurious links did *not* surface — the engine won't lie to you.
+- **New early-warning net:** an insight fires only when ≥2 of resting HR / breathing / HRV /
+  skin-temp drift off *together* (quiet now — you're healthy). Since you train hard on short
+  sleep, it's a real guardrail against pushing into strain or illness.
 - Wins to keep: HRV "strong," sleep efficiency "good," breathing/SpO2 healthy, BMI healthy,
   active-minutes meets the WHO guideline.
 

@@ -477,8 +477,46 @@ def _correlations(cache: dict[str, list[dict]]) -> list[dict[str, Any]]:
     return out
 
 
+def _vitals_watch(cache: dict[str, list[dict]]) -> list[dict[str, Any]]:
+    """Apple-Vitals-style early warning: if ≥2 of resting HR / breathing rate / skin temp are
+    elevated, or HRV is suppressed, all vs the personal baseline on the same day, nudge toward
+    rest. These often rise together days before strain or illness surfaces (Mishra 2020,
+    Natarajan 2020). Any single metric out of range is just noise; the pattern is the signal."""
+    checks = [
+        ("daily-resting-heart-rate", "up", "resting HR"),
+        ("daily-respiratory-rate", "up", "breathing rate"),
+        ("daily-heart-rate-variability", "down", "HRV"),
+        ("daily-sleep-temperature-derivations", "up", "skin temperature"),
+    ]
+    flagged = []
+    for dt, bad_dir, label in checks:
+        s = _series(dt, cache)
+        if len(s) < 10:
+            continue
+        _, last_v = s[-1]
+        hist = [v for _, v in s[:-1]][-28:]
+        m, sd = _mean(hist), _std(hist)
+        if m is None or sd < 1e-9:
+            continue
+        z = (last_v - m) / sd
+        if (bad_dir == "up" and z >= 1.5) or (bad_dir == "down" and z <= -1.5):
+            flagged.append(label)
+    if len(flagged) < 2:
+        return []
+    listed = flagged[0] if len(flagged) == 1 else " and ".join(
+        [", ".join(flagged[:-1]), flagged[-1]] if len(flagged) > 2 else flagged
+    )
+    return [{
+        "id": "vitals-watch", "kind": "anomaly", "sentiment": "bad",
+        "metric": "daily-resting-heart-rate", "title": "Several vitals are off together",
+        "detail": f"Your {listed} moved outside their normal range on the same day — a pattern "
+                  "that can precede strain or illness. An easy day and an early night would be wise.",
+        "priority": 88,
+    }]
+
+
 DETECTORS = [_trends, _anomalies, _records, _streaks, _load_balance, _sleep_debt,
-             _consistency, _rhr_elevation, _correlations]
+             _consistency, _rhr_elevation, _vitals_watch, _correlations]
 
 
 def compute(limit: int = 8) -> list[dict[str, Any]]:
