@@ -1,0 +1,217 @@
+"""FastAPI app: OAuth callback, sync trigger, and read endpoints for the dashboard."""
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+from datetime import date
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, RedirectResponse
+from pydantic import BaseModel
+
+from . import auth, coach, config, goals, insights, readiness, store, sync
+from .config import REGISTRY, REGISTRY_BY_NAME, settings
+
+# Ensure the schema exists as soon as the module is imported (covers TestClient,
+# workers, and any code path that touches the DB before a request arrives).
+store.init_db()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    store.init_db()
+    yield
+
+
+app = FastAPI(title="fitbit-plus", version="0.1.0", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/api/health")
+def health() -> dict:
+    return {
+        "status": "ok",
+        "authenticated": auth.has_valid_token(),
+        # Days until the Testing-mode refresh token dies (None until the next auth
+        # records its consent timestamp).
+        "token_days_left": auth.token_days_left(),
+    }
+
+
+@app.get("/api/data-types")
+def data_types() -> list[dict]:
+    """The registry — what the dashboard can chart."""
+    return [
+        {
+            "name": dt.api_name,
+            "label": dt.label,
+            "unit": dt.unit,
+            "scope": dt.scope.value,
+            # daily-summary and derived types have no sub-daily stream, so don't advertise
+            # an intraday view for them (it would render an empty section).
+            "intraday": dt.supports_intraday and not dt.daily_via_list and not dt.derived,
+            "group": config.group_for(dt.api_name),
+        }
+        for dt in REGISTRY
+    ]
+
+
+# --- auth --------------------------------------------------------------------
+
+@app.get("/auth/login")
+def login() -> RedirectResponse:
+    url, _state = auth.build_authorization_url()
+    return RedirectResponse(url)
+
+
+@app.get("/auth/callback", response_class=HTMLResponse)
+def auth_callback(request: Request) -> HTMLResponse:
+    # The full request URL carries the ?code=&state= that the code exchange needs.
+    try:
+        auth.exchange_code(str(request.url))
+    except auth.AuthError as exc:
+        raise HTTPException(400, str(exc))
+    return HTMLResponse(
+        "<h2>fitbit-plus connected ✅</h2>"
+        "<p>Token stored. You can close this tab and run a sync.</p>"
+    )
+
+
+# --- sync --------------------------------------------------------------------
+
+@app.post("/api/sync")
+def trigger_sync(types: list[str] | None = Query(default=None)) -> dict:
+    try:
+        selected = sync.resolve_types(types)
+        report = sync.run_sync(selected)
+    except auth.TokenExpiredError as exc:
+        raise HTTPException(401, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {
+        "ok": report.ok,
+        "total_rows": report.total_rows,
+        "results": [vars(r) for r in report.results],
+    }
+
+
+@app.get("/api/sync/status")
+def sync_state() -> list[dict]:
+    return store.sync_status()
+
+
+@app.get("/api/readiness")
+def readiness_today() -> dict:
+    """Latest readiness score + transparent component breakdown for the hero."""
+    data = readiness.today_breakdown()
+    if data is None:
+        raise HTTPException(404, "Not enough data to compute readiness yet.")
+    return data
+
+
+@app.get("/api/insights")
+def insights_feed(limit: int = Query(default=8, ge=1, le=20)) -> dict:
+    """Ranked plain-English observations derived from the stored series."""
+    return {"insights": insights.compute(limit=limit)}
+
+
+@app.get("/api/coach")
+def coach_today(limit: int = Query(default=3, ge=1, le=5)) -> dict:
+    """Ranked 'what to do today' recommendations synthesised from the current state."""
+    return coach.recommend(limit=limit)
+
+
+# --- goals -------------------------------------------------------------------
+
+class GoalIn(BaseModel):
+    data_type: str
+    comparator: str  # 'gte' (at least) | 'lte' (at most)
+    target: float
+
+
+class GoalPatch(BaseModel):
+    target: float | None = None
+    comparator: str | None = None
+
+
+@app.get("/api/goals")
+def goals_list() -> dict:
+    """Every active goal scored against the data, plus the aggregate rollup."""
+    return goals.evaluate_all()
+
+
+@app.post("/api/goals")
+def goals_create(goal: GoalIn) -> dict:
+    if goal.comparator not in goals.COMPARATORS:
+        raise HTTPException(400, "comparator must be 'gte' or 'lte'.")
+    if goal.data_type not in REGISTRY_BY_NAME:
+        raise HTTPException(404, f"Unknown metric '{goal.data_type}'.")
+    gid = store.add_goal(goal.data_type, goal.comparator, goal.target)
+    return {"id": gid}
+
+
+@app.patch("/api/goals/{goal_id}")
+def goals_update(goal_id: int, patch: GoalPatch) -> dict:
+    if patch.comparator is not None and patch.comparator not in goals.COMPARATORS:
+        raise HTTPException(400, "comparator must be 'gte' or 'lte'.")
+    store.update_goal(goal_id, target=patch.target, comparator=patch.comparator)
+    return {"ok": True}
+
+
+@app.delete("/api/goals/{goal_id}")
+def goals_delete(goal_id: int) -> dict:
+    store.delete_goal(goal_id)
+    return {"ok": True}
+
+
+# --- data --------------------------------------------------------------------
+
+@app.get("/api/data/daily")
+def daily_bulk() -> dict:
+    """Every type's daily series in one response — the dashboard's initial load."""
+    return {"series": store.query_daily_bulk()}
+
+
+def _require_type(name: str):
+    dt = REGISTRY_BY_NAME.get(name)
+    if not dt:
+        raise HTTPException(404, f"Unknown data type '{name}'.")
+    return dt
+
+
+@app.get("/api/data/{data_type}/daily")
+def daily(
+    data_type: str,
+    start: date | None = None,
+    end: date | None = None,
+) -> dict:
+    dt = _require_type(data_type)
+    return {
+        "data_type": data_type,
+        "label": dt.label,
+        "unit": dt.unit,
+        "points": store.query_daily(data_type, start, end),
+    }
+
+
+@app.get("/api/data/{data_type}/intraday")
+def intraday(
+    data_type: str,
+    start: date | None = None,
+    end: date | None = None,
+    max_points: int = Query(default=1500, ge=100, le=20000),
+) -> dict:
+    dt = _require_type(data_type)
+    if not dt.supports_intraday:
+        raise HTTPException(400, f"{data_type} has no intraday data.")
+    return {
+        "data_type": data_type,
+        "label": dt.label,
+        "unit": dt.unit,
+        "points": store.query_intraday(data_type, start, end, max_points=max_points),
+    }

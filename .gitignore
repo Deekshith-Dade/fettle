@@ -1,0 +1,22 @@
+# Secrets & local data — never commit these
+backend/credentials.json
+backend/token.json
+backend/*.db
+backend/.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+npm-debug.log*
+.DS_Store
+
+# Local Claude Code state (settings, locks)
+.claude/
