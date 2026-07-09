@@ -137,9 +137,16 @@ def _summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
             "scored": len(scored), "narrative": narrative}
 
 
+# Worst-first, like the benchmarks view: what needs work opens the section, wins close
+# it. Within a band, lowest adherence leads. Every consumer (Goals tab, Overview,
+# the coach's goals widget) inherits this order.
+_STATUS_RANK = {"off-track": 0, "no-data": 1, "on-track": 2, "met": 3}
+
+
 def evaluate_all() -> dict[str, Any]:
     """Every active goal scored against the stored data, plus the aggregate rollup."""
     ensure_seeded()
     cache = store.query_daily_bulk()
     goals = [_evaluate(g, cache) for g in store.list_goals()]
+    goals.sort(key=lambda g: (_STATUS_RANK.get(g["status"], 1), g["adherence"]))
     return {"goals": goals, "summary": _summary(goals)}

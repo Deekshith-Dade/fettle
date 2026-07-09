@@ -439,7 +439,6 @@ function FocusModule({ recs, onOpen, canOpen }: { recs: Recommendation[]; onOpen
         <span className="sec-glyph"><Glyph name="Focus" /></span>
         <h2 className="sec-title">Today's focus</h2>
       </div>
-      <p className="sec-blurb">What to do with today — read from your readiness, sleep, training load, and goals.</p>
       <hr className="sec-rule" />
       <div className="focus-grid">
         {recs.map((r, i) => {
@@ -1242,12 +1241,14 @@ export default function Dashboard() {
   }
 
   const openInfo = open ? infoByName[open] : null;
+  // Ordered by daily flow: where you stand → what you're aiming at → what the engines
+  // noticed → domain deep-dives → the raw catalog. Coach renders after these, last.
   const tabs = [
     { id: "overview", label: "Overview" },
-    ...(sleepDetail ? [{ id: "sleep", label: "Sleep" }] : []),
-    ...(benchmarks ? [{ id: "standing", label: "Standing" }] : []),
     { id: "goals", label: "Goals" },
     ...(insights.length ? [{ id: "insights", label: "Insights" }] : []),
+    ...(sleepDetail ? [{ id: "sleep", label: "Sleep" }] : []),
+    ...(benchmarks ? [{ id: "standing", label: "Standing" }] : []),
     { id: "metrics", label: "Metrics" },
   ];
 
@@ -1459,9 +1460,16 @@ export default function Dashboard() {
             </section>
           )}
 
-          {/* ———— OVERVIEW · today's focus + at a glance + goals & insights teasers ———— */}
+          {/* ———— OVERVIEW · goals + today's focus + at a glance + teasers ———— */}
           {view === "overview" && (
             <>
+              {/* Goals lead — intent sits right under the readiness verdict. */}
+              <GoalsSection
+                goals={goals} summary={goalsSummary} types={types} dailyCache={dailyCache}
+                onOpen={setOpen} onAdd={addGoal} onEdit={editGoal} onRemove={removeGoal}
+                compact onManage={() => go("goals")}
+              />
+
               <FocusModule recs={coachRecs} onOpen={setOpen} canOpen={(m) => !!infoByName[m]} />
 
               {highlights.length > 0 && (
@@ -1477,12 +1485,6 @@ export default function Dashboard() {
 
               {sleepDetail && <SleepTeaser data={sleepDetail} onOpen={() => go("sleep")} />}
               {benchmarks && <StandingTeaser data={benchmarks} onOpen={() => go("standing")} />}
-
-              <GoalsSection
-                goals={goals} summary={goalsSummary} types={types} dailyCache={dailyCache}
-                onOpen={setOpen} onAdd={addGoal} onEdit={editGoal} onRemove={removeGoal}
-                compact onManage={() => go("goals")}
-              />
 
               {insights.length > 0 && (
                 <section className="section rise" style={{ animationDelay: "160ms" }}>
