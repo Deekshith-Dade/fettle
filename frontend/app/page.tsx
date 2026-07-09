@@ -216,9 +216,14 @@ function bucketWeekly(pts: Point[]): { x: string; y: number }[] {
 }
 
 function scoreColor(score: number): string {
-  if (score >= 75) return "#cdf24e";
-  if (score >= 55) return "#f4c257";
-  return "#f47a8f";
+  // These tones are used as text and fills on light panels. The neon dark-mode palette
+  // washes out on the "paper" light theme, so use deepened variants there. Reading the DOM
+  // is safe — every score-colored element renders only after the client data load (post-
+  // hydration), never during SSR, and re-renders when the theme toggles.
+  const light = typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "light";
+  if (score >= 75) return light ? "#5f8c0f" : "#cdf24e";
+  if (score >= 55) return light ? "#a9710c" : "#f4c257";
+  return light ? "#cf4d63" : "#f47a8f";
 }
 
 function formatNum(n: number): string {
@@ -674,7 +679,7 @@ function AddGoalForm({
 }
 
 function GoalsAggregate({ summary, scored }: { summary: GoalsResponse["summary"]; scored: Goal[] }) {
-  const color = summary.overall >= 70 ? "#cdf24e" : summary.overall >= 45 ? "#f4c257" : "#f47a8f";
+  const color = scoreColor(summary.overall);
   return (
     <div className="goals-agg">
       <GoalRing pct={summary.overall} color={color} />

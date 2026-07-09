@@ -36,7 +36,7 @@ const themeScript =
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${hanken.variable}`}>
+    <html lang="en" suppressHydrationWarning className={`${display.variable} ${hanken.variable}`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
