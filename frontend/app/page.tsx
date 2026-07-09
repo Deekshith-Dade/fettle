@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import { api, BenchmarksResponse, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, SleepDetail } from "@/lib/api";
 import { BenchmarksView, SleepView, SleepTeaser, StandingTeaser } from "@/components/insights-views";
+import { CommandPalette } from "@/components/command-palette";
 
 /* ————— configuration ————— */
 
@@ -1040,6 +1041,7 @@ export default function Dashboard() {
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [view, setView] = useState("overview");
   const navRef = useRef<HTMLElement>(null);
   const [navStuck, setNavStuck] = useState(false);
@@ -1284,6 +1286,25 @@ export default function Dashboard() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  // ⌘K / Ctrl-K toggles the command palette anywhere; "/" opens it too, unless you're
+  // typing in a field (goal editor, etc.). Escape is handled inside the palette.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+        return;
+      }
+      if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey && !paletteOpen) {
+        const el = document.activeElement as HTMLElement | null;
+        const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+        if (!typing) { e.preventDefault(); setPaletteOpen(true); }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [paletteOpen]);
+
   const loading = authed === null && !error;
 
   return (
@@ -1294,6 +1315,14 @@ export default function Dashboard() {
           <h1>fitbit<em>+</em></h1>
         </div>
         <div className="controls">
+          <button className="searchpill" onClick={() => setPaletteOpen(true)}
+            aria-label="Search metrics" title="Search metrics (⌘K)">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" aria-hidden>
+              <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" />
+            </svg>
+            <span className="searchpill-label">Search</span>
+            <kbd className="searchpill-kbd">⌘K</kbd>
+          </button>
           <button className="btn theme-toggle" onClick={cycleTheme}
             title={`Theme: ${theme}${theme === "system" ? " · follows your device" : ""}`}
             aria-label={`Theme: ${theme}. Click to change.`}>
@@ -1523,6 +1552,16 @@ export default function Dashboard() {
           onClose={() => setOpen(null)}
         />
       )}
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        types={types}
+        dailyCache={dailyCache}
+        tabs={tabs}
+        onOpenMetric={(name) => setOpen(name)}
+        onGoView={(id) => go(id)}
+      />
     </div>
   );
 }
