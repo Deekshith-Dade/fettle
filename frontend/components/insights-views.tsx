@@ -282,22 +282,22 @@ export function SleepView({ data }: { data: SleepDetail | null }) {
         <AreaChart data={durChart} margin={{ left: -6, right: 8, top: 6 }}>
           <defs>
             <linearGradient id="sleepg" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--cyan)" stopOpacity={0.32} />
-              <stop offset="100%" stopColor="var(--cyan)" stopOpacity={0} />
+              <stop offset="0%" stopColor="#2ba7be" stopOpacity={0.3} />
+              <stop offset="100%" stopColor="#2ba7be" stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid stroke="var(--line)" vertical={false} />
-          <XAxis dataKey="x" stroke="var(--faint)" fontSize={11} minTickGap={40}
+          <CartesianGrid stroke="rgba(130,130,130,0.14)" vertical={false} />
+          <XAxis dataKey="x" stroke="#8b929c" fontSize={11} minTickGap={40}
             tickLine={false} axisLine={false} tickFormatter={shortDay} />
-          <YAxis stroke="var(--faint)" fontSize={11} width={30} domain={[0, "auto"]}
+          <YAxis stroke="#8b929c" fontSize={11} width={30} domain={[0, "auto"]}
             tickLine={false} axisLine={false} />
           <Tooltip
             contentStyle={{ background: "var(--panel-solid)", border: "1px solid var(--line-strong)", borderRadius: 10, fontSize: 12, color: "var(--text)" }}
             labelStyle={{ color: "var(--muted)" }} labelFormatter={(d) => longDay(String(d))}
             formatter={(v) => [`${fmt(Number(v))} h`, "Sleep"]} />
-          <ReferenceLine y={data.need_hours} stroke="var(--line-strong)" strokeDasharray="5 5"
-            label={{ value: `need ${data.need_hours}h`, position: "insideTopRight", fill: "var(--faint)", fontSize: 10 }} />
-          <Area type="monotone" dataKey="y" stroke="var(--cyan)" fill="url(#sleepg)"
+          <ReferenceLine y={data.need_hours} stroke="rgba(130,130,130,0.4)" strokeDasharray="5 5"
+            label={{ value: `need ${data.need_hours}h`, position: "insideTopRight", fill: "#8b929c", fontSize: 10 }} />
+          <Area type="monotone" dataKey="y" stroke="#2ba7be" fill="url(#sleepg)"
             strokeWidth={2} connectNulls dot={false} isAnimationActive={false} />
         </AreaChart>
       </ResponsiveContainer>

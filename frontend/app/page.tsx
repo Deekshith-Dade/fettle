@@ -287,9 +287,9 @@ function Ring({ score }: { score: number }) {
     <div className="ring">
       <svg width="240" height="240" viewBox="0 0 240 240">
         {/* tick ring — the instrument bezel */}
-        <circle cx="120" cy="120" r="115" fill="none" stroke="rgba(255,255,255,0.10)"
+        <circle cx="120" cy="120" r="115" fill="none" stroke="rgba(130,130,130,0.22)"
           strokeWidth="4" strokeDasharray="1.5 10.55" />
-        <circle cx="120" cy="120" r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="10" />
+        <circle cx="120" cy="120" r={r} fill="none" stroke="rgba(130,130,130,0.15)" strokeWidth="10" />
         <circle
           cx="120" cy="120" r={r} fill="none" stroke={color} strokeWidth="10" strokeLinecap="round"
           strokeDasharray={c} strokeDashoffset={offset}
@@ -514,7 +514,7 @@ function GoalRing({ pct, color }: { pct: number; color: string }) {
   return (
     <div className="goal-ring">
       <svg width="108" height="108" viewBox="0 0 108 108">
-        <circle cx="54" cy="54" r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="8" />
+        <circle cx="54" cy="54" r={r} fill="none" stroke="rgba(130,130,130,0.18)" strokeWidth="8" />
         <circle cx="54" cy="54" r={r} fill="none" stroke={color} strokeWidth="8" strokeLinecap="round"
           strokeDasharray={c} strokeDashoffset={off} transform="rotate(-90 54 54)"
           style={{ transition: "stroke-dashoffset 0.9s var(--ease)", filter: `drop-shadow(0 0 6px ${color}55)` }} />
@@ -1015,6 +1015,7 @@ export default function Dashboard() {
   const [view, setView] = useState("overview");
   const navRef = useRef<HTMLElement>(null);
   const [navStuck, setNavStuck] = useState(false);
+  const [theme, setTheme] = useState<"system" | "light" | "dark">("system");
   const [dailyCache, setDailyCache] = useState<Record<string, Point[]>>({});
   const [intradayCache, setIntradayCache] = useState<Record<string, Point[]>>({});
   const [readiness, setReadiness] = useState<{
@@ -1219,6 +1220,30 @@ export default function Dashboard() {
     requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
   }
 
+  // Theme: 'system' follows the OS; 'light'/'dark' pin it. The <head> script sets the initial
+  // data-theme before paint; here we mirror the saved choice and react to OS changes.
+  useEffect(() => {
+    const saved = localStorage.getItem("theme");
+    setTheme(saved === "light" || saved === "dark" ? saved : "system");
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onSys = () => {
+      if ((localStorage.getItem("theme") ?? "system") === "system")
+        document.documentElement.setAttribute("data-theme", mq.matches ? "dark" : "light");
+    };
+    mq.addEventListener("change", onSys);
+    return () => mq.removeEventListener("change", onSys);
+  }, []);
+
+  function applyTheme(next: "system" | "light" | "dark") {
+    const sysDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    document.documentElement.setAttribute("data-theme", next === "system" ? (sysDark ? "dark" : "light") : next);
+    if (next === "system") localStorage.removeItem("theme");
+    else localStorage.setItem("theme", next);
+    setTheme(next);
+  }
+  const cycleTheme = () =>
+    applyTheme(theme === "system" ? "light" : theme === "light" ? "dark" : "system");
+
   // The nav is transparent until it pins to the top, then a subtle backdrop fades in
   // so tabs stay legible over scrolling content without a band that "sticks out" at rest.
   useEffect(() => {
@@ -1241,6 +1266,23 @@ export default function Dashboard() {
           <h1>fitbit<em>+</em></h1>
         </div>
         <div className="controls">
+          <button className="btn theme-toggle" onClick={cycleTheme}
+            title={`Theme: ${theme}${theme === "system" ? " · follows your device" : ""}`}
+            aria-label={`Theme: ${theme}. Click to change.`}>
+            {theme === "system" ? (
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <rect x="3" y="4" width="18" height="12" rx="1.5" /><path d="M8 20h8M12 16v4" />
+              </svg>
+            ) : theme === "light" ? (
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M19.5 14.5A8 8 0 0 1 9.5 4.3 8 8 0 1 0 19.5 14.5z" />
+              </svg>
+            )}
+          </button>
           {syncFlash && <span className="flash">{syncFlash}</span>}
           {lastSynced && !syncFlash && <span className="syncmeta">synced {relTime(lastSynced)}</span>}
           {authed === null ? (

@@ -21,12 +21,25 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0a0b0d",
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#0a0b0d" },
+    { media: "(prefers-color-scheme: light)", color: "#f3f1ea" },
+  ],
 };
+
+// Resolve the theme (saved choice, else system) before first paint — no flash of the
+// wrong palette. Mirrors the toggle logic in the dashboard.
+const themeScript =
+  `(function(){try{var t=localStorage.getItem('theme');` +
+  `var d=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';` +
+  `document.documentElement.setAttribute('data-theme',(t==='light'||t==='dark')?t:d);}catch(e){}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${display.variable} ${hanken.variable}`}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body>{children}</body>
     </html>
   );

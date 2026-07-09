@@ -29,7 +29,52 @@
 
   --r: 16px;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --track: rgba(255, 255, 255, 0.06);   /* empty progress-track fill */
+  color-scheme: dark;
 }
+
+/* Light theme — a warm "paper" counterpart to the ink ground. The no-flash script
+   in <head> resolves the user's choice (or system) onto :root[data-theme]. Dark stays
+   the default so an unset root always renders the original design. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --ink: #f3f1ea;
+  --ink-1: #fbf9f5;
+  --panel: rgba(18, 22, 28, 0.025);
+  --panel-solid: #ffffff;
+  --panel-hi: rgba(18, 22, 28, 0.05);
+  --line: rgba(18, 22, 28, 0.10);
+  --line-strong: rgba(18, 22, 28, 0.17);
+  --hairline: rgba(18, 22, 28, 0.09);
+  --track: rgba(18, 22, 28, 0.07);
+
+  --text: #1b1d21;
+  --muted: #565c66;
+  --faint: #838a94;
+
+  /* Signal colors deepened so they stay legible on paper; dark keeps the neon brand. */
+  --lime: #5f8c0f;
+  --lime-dim: rgba(95, 140, 15, 0.13);
+  --amber: #a9710c;
+  --rose: #cf4d63;
+  --cyan: #1f8ea4;
+}
+/* Softer atmosphere on light: gentler glows, near-invisible grain. */
+:root[data-theme="light"] body::after {
+  background:
+    radial-gradient(60% 45% at 78% -5%, rgba(95, 140, 15, 0.05), transparent 60%),
+    radial-gradient(55% 40% at 8% 8%, rgba(31, 142, 164, 0.045), transparent 60%),
+    radial-gradient(90% 60% at 50% 120%, rgba(150, 120, 205, 0.04), transparent 70%);
+}
+:root[data-theme="light"] body::before { opacity: 0.05; }
+/* Progress tracks were tuned for a dark ground; retint them for paper. */
+:root[data-theme="light"] .driver .d-track,
+:root[data-theme="light"] .strip-cell,
+:root[data-theme="light"] .goal-bar,
+:root[data-theme="light"] .acwr-track,
+:root[data-theme="light"] .dw-goal-bar,
+:root[data-theme="light"] .goal-ring-track { background: var(--track); }
 
 * { box-sizing: border-box; }
 button { color: inherit; font-family: inherit; }
@@ -672,6 +717,9 @@ body::before {
 .sleep-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 13px; margin-top: 26px; }
 .sleep-cards .rec-title { text-transform: capitalize; }
 .sleep-card-sub { color: var(--faint); font-size: 12px; letter-spacing: 0.02em; margin: -4px 0 8px; }
+
+.theme-toggle { padding: 8px 10px; }
+.theme-toggle svg { display: block; }
 
 @media (max-width: 760px) {
   .sleep-hero { grid-template-columns: 1fr; gap: 22px; }
