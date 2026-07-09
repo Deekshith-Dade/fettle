@@ -19,8 +19,8 @@ import subprocess
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from . import benchmarks, goals, insights, readiness, sleep_analysis, store
-from .chat import DEFAULT_MODEL, REPO_ROOT, _opencode_bin, _plain
+from . import auth, benchmarks, goals, insights, readiness, sleep_analysis, store
+from .chat import REPO_ROOT, _opencode_bin, _plain, resolve_model
 from .config import REGISTRY, REGISTRY_BY_NAME
 
 AGENT = "fitbit-analyst"
@@ -92,11 +92,31 @@ def _summary_30d(bulk: dict[str, list[dict]], days: int = 30) -> list[dict]:
     return out
 
 
+def _system_status() -> dict:
+    """Data-trust context: token lifetime and sync freshness. A dead token or stale
+    sync quietly poisons every other read, so the analyst is told to lead with it."""
+    rows = store.sync_status()
+    last = max((r["last_sync_at"] for r in rows if r["last_sync_at"]), default=None)
+    hours = None
+    if last:
+        try:
+            hours = round(
+                (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() / 3600, 1)
+        except ValueError:
+            pass
+    return {
+        "authenticated": auth.has_valid_token(),
+        "token_days_left": auth.token_days_left(),
+        "hours_since_last_sync": hours,
+    }
+
+
 def build_evidence() -> dict[str, Any]:
     bulk = store.query_daily_bulk()
     return {
         "date": date.today().isoformat(),
         "profile": "Male, mid-20s. Stated aims: train more consistently, sleep better.",
+        "system": _system_status(),
         "signals": insights.compute(limit=24),  # the detectors' (near-)full output
         "readiness": readiness.today_breakdown(),
         "sleep": _slim_sleep(sleep_analysis.detail()),
@@ -108,11 +128,11 @@ def build_evidence() -> dict[str, Any]:
 
 # --- the model call ----------------------------------------------------------------
 
-def _run_analyst(evidence_json: str, nudge: str = "") -> str:
+def _run_analyst(evidence_json: str, model: str, nudge: str = "") -> str:
     """One tool-less opencode run; returns the concatenated text output."""
     message = evidence_json if not nudge else f"{evidence_json}\n\n{nudge}"
     cmd = [_opencode_bin(), "run", "--format", "json", "--agent", AGENT,
-           "-m", DEFAULT_MODEL, "--", message]
+           "-m", model, "--", message]
     try:
         proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True,
                               text=True, timeout=_TIMEOUT)
@@ -198,19 +218,20 @@ def generate(force: bool = False) -> dict:
         if row and row["evidence_digest"] == digest:
             return latest()  # nothing new since last time — reuse
 
+    model = resolve_model()  # survives free-tier lineup rotation
     try:
-        briefing = _parse(_run_analyst(evidence_json))
+        briefing = _parse(_run_analyst(evidence_json, model))
     except (BriefingError, json.JSONDecodeError):
         # One stern retry — free models occasionally wrap or truncate the JSON.
         briefing = _parse(_run_analyst(
-            evidence_json,
+            evidence_json, model,
             "REMINDER: reply with ONLY the JSON object — no fences, no prose around it."))
 
     with store._connect() as conn:
         conn.execute(
             "INSERT INTO briefings (day, generated_at, model, headline, narrative, insights, evidence_digest) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (evidence["date"], datetime.now(timezone.utc).isoformat(), DEFAULT_MODEL,
+            (evidence["date"], datetime.now(timezone.utc).isoformat(), model,
              briefing["headline"], briefing["narrative"],
              json.dumps(briefing["insights"]), digest),
         )

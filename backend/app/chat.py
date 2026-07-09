@@ -20,6 +20,7 @@ import asyncio
 import json
 import re
 import shutil
+import subprocess
 import time
 import uuid
 from pathlib import Path
@@ -104,30 +105,47 @@ def _pretty(model_id: str) -> str:
     return " ".join(words)
 
 
-_models_cache: tuple[float, list[dict]] = (0.0, [])
+_ids_cache: tuple[float, list[str]] = (0.0, [])
 
-@router.get("/models")
-async def models() -> list[dict]:
-    """Models the local opencode account can run (with a Zen account: the free set)."""
-    global _models_cache
-    ts, cached = _models_cache
+def _available_ids() -> list[str]:
+    """Model ids the local opencode account can run right now (10-min cache).
+    Empty means the CLI call itself failed (opencode down / logged out) — no info."""
+    global _ids_cache
+    ts, cached = _ids_cache
     if cached and time.time() - ts < 600:
         return cached
     try:
-        proc = await asyncio.create_subprocess_exec(
-            _opencode_bin(), "models",
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-            cwd=str(REPO_ROOT),
+        proc = subprocess.run(
+            [_opencode_bin(), "models"], capture_output=True, text=True,
+            timeout=30, cwd=str(REPO_ROOT),
         )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-        ids = [ln.strip() for ln in out.decode().splitlines() if ln.strip().startswith("opencode/")]
-    except (OSError, asyncio.TimeoutError):
+        ids = [ln.strip() for ln in proc.stdout.splitlines()
+               if ln.strip().startswith("opencode/")]
+    except (OSError, subprocess.TimeoutExpired):
         ids = []
-    if DEFAULT_MODEL not in ids:
-        ids.insert(0, DEFAULT_MODEL)  # always offer the proven default
-    result = [{"id": i, "label": _pretty(i), "recommended": i == DEFAULT_MODEL} for i in ids]
-    _models_cache = (time.time(), result)
-    return result
+    if ids:
+        _ids_cache = (time.time(), ids)
+    return ids
+
+
+def resolve_model(requested: str | None = None) -> str:
+    """The model a run should use. The free Zen lineup rotates ('limited-time beta'),
+    so a stored/default id that has vanished must degrade to the first model the
+    account still offers — not surface as a cryptic run failure. An empty catalog
+    (CLI unreachable) returns the request unchanged and lets opencode report."""
+    ids = _available_ids()
+    want = requested or DEFAULT_MODEL
+    if want in ids or not ids:
+        return want
+    return ids[0]
+
+
+@router.get("/models")
+def models() -> list[dict]:
+    """Models the picker offers (with a Zen account: the free set)."""
+    ids = _available_ids() or [DEFAULT_MODEL]  # keep the UI alive if the CLI is down
+    rec = DEFAULT_MODEL if DEFAULT_MODEL in ids else ids[0]
+    return [{"id": i, "label": _pretty(i), "recommended": i == rec} for i in ids]
 
 
 # --- conversations ---------------------------------------------------------------
@@ -214,7 +232,8 @@ async def chat(body: ChatIn) -> StreamingResponse:
     else:
         conv = chat_store.create_conversation(_title_from(message), body.model or DEFAULT_MODEL)
 
-    model = body.model or conv.get("model") or DEFAULT_MODEL
+    # Resolve against the live catalog — a rotated-out model falls back gracefully.
+    model = await asyncio.to_thread(resolve_model, body.model or conv.get("model"))
     if model != conv.get("model"):
         chat_store.set_model(conv["id"], model)
 
