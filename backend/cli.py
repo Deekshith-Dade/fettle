@@ -1,4 +1,4 @@
-"""fitbit-plus command line.
+"""fettle command line.
 
     python cli.py auth              # browser OAuth, stores token.json
     python cli.py sync              # sync all registered data types

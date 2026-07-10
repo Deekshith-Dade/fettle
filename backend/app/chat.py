@@ -1,6 +1,6 @@
 """AI coach chat — bridges the dashboard to the opencode CLI.
 
-Each turn shells out to `opencode run --format json --agent fitbit-coach` and re-emits
+Each turn shells out to `opencode run --format json --agent fettle-coach` and re-emits
 its NDJSON part events as Server-Sent Events the chat UI can render live:
 
     meta  {conversation_id, title, model}     first, so a new chat gets its id at once
@@ -38,7 +38,7 @@ from .config import BASE_DIR
 REPO_ROOT = BASE_DIR.parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 
-AGENT = "fitbit-coach"
+AGENT = "fettle-coach"
 DEFAULT_MODEL = "opencode/deepseek-v4-flash-free"  # proven tool-caller on the free tier
 TURN_TIMEOUT = 240   # hard cap on one whole turn (multi-tool turns take ~10-40s)
 LINE_TIMEOUT = 150   # max quiet time between events before we assume a hang
@@ -47,31 +47,31 @@ MAX_UPLOAD = 15 * 1024 * 1024
 # Display tools render inline widgets in the chat instead of feeding the model data.
 # The bridge spots them by prefix and emits a `widget` SSE event with the call's params;
 # the frontend mounts the matching component (which fetches its own fresh data).
-WIDGET_PREFIX = "fitbit_show_"
+WIDGET_PREFIX = "fettle_show_"
 
-# Friendly names for the MCP tools (opencode namespaces them as fitbit_<tool>).
+# Friendly names for the MCP tools (opencode namespaces them as fettle_<tool>).
 TOOL_LABELS = {
-    "fitbit_list_metrics": "Metric catalog",
-    "fitbit_get_summary": "Data summary",
-    "fitbit_get_metric": "Metric history",
-    "fitbit_get_intraday": "Intraday detail",
-    "fitbit_get_readiness": "Readiness engine",
-    "fitbit_get_insights": "Insights scan",
-    "fitbit_get_coach": "Coach engine",
-    "fitbit_get_benchmarks": "Peer benchmarks",
-    "fitbit_get_sleep": "Sleep analysis",
-    "fitbit_get_goals": "Goal tracker",
-    "fitbit_get_workouts": "Session log",
-    "fitbit_create_goal": "Goal created",
-    "fitbit_update_goal": "Goal updated",
-    "fitbit_delete_goal": "Goal removed",
-    "fitbit_remember": "Saved to memory",
-    "fitbit_recall": "Memory recall",
-    "fitbit_forget": "Memory removed",
+    "fettle_list_metrics": "Metric catalog",
+    "fettle_get_summary": "Data summary",
+    "fettle_get_metric": "Metric history",
+    "fettle_get_intraday": "Intraday detail",
+    "fettle_get_readiness": "Readiness engine",
+    "fettle_get_insights": "Insights scan",
+    "fettle_get_coach": "Coach engine",
+    "fettle_get_benchmarks": "Peer benchmarks",
+    "fettle_get_sleep": "Sleep analysis",
+    "fettle_get_goals": "Goal tracker",
+    "fettle_get_workouts": "Session log",
+    "fettle_create_goal": "Goal created",
+    "fettle_update_goal": "Goal updated",
+    "fettle_delete_goal": "Goal removed",
+    "fettle_remember": "Saved to memory",
+    "fettle_recall": "Memory recall",
+    "fettle_forget": "Memory removed",
 }
 
 # Tool calls that change stored goals — the UI busts its goals-widget cache on these.
-GOAL_MUTATIONS = {"fitbit_create_goal", "fitbit_update_goal", "fitbit_delete_goal"}
+GOAL_MUTATIONS = {"fettle_create_goal", "fettle_update_goal", "fettle_delete_goal"}
 
 router = APIRouter(prefix="/api/chat")
 chat_store.init_db()
@@ -343,7 +343,7 @@ async def _turn(
                     else:
                         info = {
                             "name": name,
-                            "label": TOOL_LABELS.get(name, name.replace("fitbit_", "").replace("_", " ")),
+                            "label": TOOL_LABELS.get(name, name.replace("fettle_", "").replace("_", " ")),
                             "input": params,
                         }
                         tools_used.append(info)

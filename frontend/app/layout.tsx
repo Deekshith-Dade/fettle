@@ -16,7 +16,7 @@ const hanken = Hanken_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "fitbit+",
+  title: "fettle",
   description: "Your health, read closely.",
 };
 

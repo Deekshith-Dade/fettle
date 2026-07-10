@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Coach — the conversational face of fitbit+.
+ * Coach — the conversational face of fettle.
  *
  * A ChatGPT-style two-pane chat over the /api/chat bridge: conversation history in the
  * sidebar (opencode keeps the LLM-side context; we render the stored transcript), live
@@ -23,7 +23,7 @@ import { bustWidgetCache, ChatWidget } from "./chat-widgets";
 
 // Tool calls that change stored goals — any goals widget rendered after one of these
 // must refetch rather than reuse the 60s cache.
-const GOAL_MUTATIONS = new Set(["fitbit_create_goal", "fitbit_update_goal", "fitbit_delete_goal"]);
+const GOAL_MUTATIONS = new Set(["fettle_create_goal", "fettle_update_goal", "fettle_delete_goal"]);
 
 const SUGGESTIONS: { glyph: string; q: string }[] = [
   { glyph: "◎", q: "How's my recovery today, and what's driving it?" },
@@ -216,7 +216,7 @@ function Sidebar({
         <div className="side-head">
           <a className="wordmark side-mark" href="/">
             <span className="dot" />
-            <h1>fitbit<em>+</em></h1>
+            <h1>fettle</h1>
           </a>
           <span className="side-tag">coach</span>
         </div>

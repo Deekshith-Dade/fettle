@@ -1,6 +1,8 @@
-# fitbit+
+# fettle
 
-Own your Fitbit / Pixel health data. fitbit+ syncs it from the **Google Health API**
+*fettle (n.) — condition, shape: "in fine fettle."*
+
+Own your Fitbit / Pixel health data. fettle syncs it from the **Google Health API**
 into a local SQLite file, computes transparent versions of the "Premium" metrics
 (readiness, sleep score, training load), and puts a dashboard, an insights engine,
 and a **zero-cost AI coach** on top — all running on your machine, with your data
@@ -44,6 +46,25 @@ with live sparklines in the results:
 <img src="docs/screenshots/palette.png" width="49.5%" alt="Command palette" />
 </p>
 
+**Workout drill-down, and the coach on a session** — any session expands into its
+heart-rate trace with %HRmax time-in-zone; asked about a workout, the coach pulls the
+session log, renders the day's trace inline, and folds remembered context (an injury
+mentioned in an earlier chat) into the advice:
+
+<p>
+<img src="docs/screenshots/workout-drilldown.png" width="49.5%" alt="Expanded workout session with HR trace and zones" />
+<img src="docs/screenshots/coach-intraday.png" width="49.5%" alt="Coach analyzing a session with an intraday widget" />
+</p>
+
+**Coach memory and the weekly retrospective** — the Memory panel lists every durable
+fact the coach has saved, each removable; Sundays close the week with a written
+week-over-week review:
+
+<p>
+<img src="docs/screenshots/coach-memory.png" width="49.5%" alt="Coach memory panel" />
+<img src="docs/screenshots/weekly-retro.png" width="49.5%" alt="Weekly retrospective briefing" />
+</p>
+
 **Sleep analysis and peer benchmarks** — stage mix against published targets, 14-night sleep
 debt and consistency; reference bands with the next threshold annotated and every value cited:
 
@@ -84,13 +105,24 @@ cards with streaks and 28-day adherence, sorted by status:
   training-load balance, 14-night sleep debt, Spearman correlations (honestly framed
   as associations), goal streaks, and a vitals early-warning that only fires when ≥2
   vitals drift together.
+- **Workout drill-down** — every session row expands into its intraday heart-rate
+  trace, %HRmax time-in-zone, and a comparison against your median session of that
+  activity.
 - **AI coach** (`/coach`) — a ChatGPT-style chat over *your* data: conversation
   history, attachments, model picker, streaming replies with **inline generative
-  widgets** (charts, comparisons, readiness ring, sleep stages, benchmark bands,
-  goals). The coach can also create, update, and delete your goals.
-- **Daily briefing** — after each sync, an analyst model turns the day's computed
-  evidence into a morning read: headline, narrative, and 3–5 insight cards, every
-  number traceable back to the evidence pack.
+  widgets** (charts, comparisons, intraday traces, readiness ring, sleep stages,
+  benchmark bands, goals). The coach can create, update, and delete your goals —
+  and it **remembers**: durable facts you mention (injuries, schedule, events) are
+  saved, recalled at the start of each conversation, and listed in a Memory panel
+  you can prune anytime.
+- **Daily briefing + weekly retrospective** — after each sync, an analyst model
+  turns the day's computed evidence into a morning read (headline, narrative, 3–5
+  cards, every number traceable). Yesterday's briefing rides along as context, so
+  narratives continue instead of restarting. Sundays add a week-over-week
+  retrospective: what changed, which goals moved, one thing to fix next week.
+- **Notifications** — after a scheduled sync, macOS notifications fire only when
+  something needs you: the 7-day token is about to die, several vitals drift
+  together, or a goal streak you'd built breaks.
 
 ## How the AI layer works
 
@@ -98,7 +130,7 @@ cards with streaks and 28-day adherence, sorted by status:
 Next.js chat UI ──SSE──▶ FastAPI /api/chat ──subprocess──▶ opencode run (free Zen models)
                                                                  │ MCP (stdio)
                                                                  ▼
-                                            backend/mcp_server.py — 21 typed tools
+                                            backend/mcp_server.py — 25 typed tools
                                                                  │
                                                                  ▼
                                             SQLite + the deterministic analysis engine
@@ -107,9 +139,10 @@ Next.js chat UI ──SSE──▶ FastAPI /api/chat ──subprocess──▶ o
 - The app **never holds an LLM API key**. It shells out to the [opencode](https://opencode.ai)
   CLI you're already logged into, using opencode Zen's free models, so there is no
   per-conversation cost.
-- `backend/mcp_server.py` exposes the analysis engine as **21 MCP tools** (11 read,
-  3 goal-write, 7 display). Metric arguments are closed enums generated from the
-  data-type registry, so the model *cannot* hallucinate a metric name.
+- `backend/mcp_server.py` exposes the analysis engine as **25 MCP tools** (12 read,
+  5 write — goals and memory — and 8 display). Metric arguments are closed enums
+  generated from the data-type registry, so the model *cannot* hallucinate a
+  metric name.
 - **The LLM orchestrates and narrates; it never does the math.** Trends, anomalies,
   correlations, and scores all come from the deterministic engine — the model's job
   is to call the right tools and explain the results.
@@ -189,22 +222,24 @@ python3 -m venv .venv-mcp
 
 Then point `opencode.json` (repo root) at **your** checkout — the MCP `command`
 paths are absolute. The agent personas live in `.opencode/agent/`
-(`fitbit-coach` for chat, `fitbit-analyst` for the briefing); both default to a
+(`fettle-coach` for chat, `fettle-analyst` for the briefings); both default to a
 free model, and the backend falls back automatically when the free-model lineup
 rotates.
 
-### Scheduled sync (optional)
+### Scheduled sync + notifications (optional)
 
-`ops/com.fitbit-plus.sync.plist` runs `cli.py sync` (which also refreshes the
-briefing) every 6 hours via launchd. Edit the two absolute paths to your checkout,
-then:
+`ops/com.fettle.sync.plist` runs `cli.py sync` every 6 hours via launchd. Each run
+also refreshes the daily briefing (and the weekly retrospective on Sundays), then
+sends a macOS notification if — and only if — something needs attention: token
+about to expire, the multi-vital early-warning firing, or a broken goal streak.
+Edit the two absolute paths to your checkout, then:
 
 ```bash
-cp ops/com.fitbit-plus.sync.plist ~/Library/LaunchAgents/
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.fitbit-plus.sync.plist
+cp ops/com.fettle.sync.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.fettle.sync.plist
 ```
 
-Logs land in `~/Library/Logs/fitbit-plus-sync.log`; exit code 2 in the log means
+Logs land in `~/Library/Logs/fettle-sync.log`; exit code 2 in the log means
 the 7-day token died — re-run `python cli.py auth`.
 
 ## Repo map
@@ -223,10 +258,12 @@ backend/
     benchmarks.py       Peer-norm bands ("Standing")
     goals.py            Goal CRUD + adherence evaluation
     coach.py            Deterministic day-plan recommendations
-    briefing.py         Evidence pack → analyst model → validated daily briefing
+    briefing.py         Evidence packs → analyst model → daily briefing + weekly retro
+    workouts.py         Per-session detail: intraday HR trace + time-in-zone
+    notify.py           Post-sync macOS alerts (token / vitals / broken streaks)
     chat.py             SSE bridge: /api/chat ↔ opencode CLI (tools → widgets)
     chat_store.py       Conversation + message persistence
-  mcp_server.py         The 21 MCP tools the coach model calls
+  mcp_server.py         The 25 MCP tools the coach model calls
   cli.py                auth / sync / status commands
 frontend/
   app/page.tsx          The dashboard (all views)
@@ -235,7 +272,7 @@ frontend/
 docs/
   health-metrics-spec.md  The cited evidence base for every formula and threshold
 ops/
-  com.fitbit-plus.sync.plist  launchd schedule
+  com.fettle.sync.plist  launchd schedule (sync → briefings → notifications)
 ```
 
 ## Gotchas

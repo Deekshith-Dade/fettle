@@ -1,4 +1,4 @@
-"""fitbit-plus MCP server — the health database + analysis engine, exposed as tools.
+"""fettle MCP server — the health database + analysis engine, exposed as tools.
 
 An LLM agent (driven via the opencode CLI) calls these to answer questions about the
 user's health data. Design stance: every tool wraps an existing, deterministic function
@@ -30,7 +30,7 @@ from mcp.server.fastmcp import FastMCP  # noqa: E402
 
 store.init_db()  # ensure the schema/connection is valid before serving
 
-mcp = FastMCP("fitbit-plus")
+mcp = FastMCP("fettle")
 
 # Closed vocabulary of metric names. Member values are the real api_names ("daily-resting-
 # heart-rate", …); the model sees them as the allowed enum and can't invent one.

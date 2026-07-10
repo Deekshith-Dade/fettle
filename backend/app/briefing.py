@@ -3,7 +3,7 @@
 The detectors in insights.py stay the source of truth for *facts* (they do the real
 statistics). This module packs their uncapped output — plus readiness, sleep, goals,
 benchmarks, and 30-day summaries — into one evidence JSON, hands it to the tool-less
-`fitbit-analyst` opencode agent, and stores the returned {headline, narrative, insights}
+`fettle-analyst` opencode agent, and stores the returned {headline, narrative, insights}
 so the dashboard renders it instantly. Generated after each sync (cli.py) and on demand
 (POST /api/briefing/refresh); an evidence digest skips regeneration when nothing changed.
 
@@ -23,7 +23,7 @@ from . import auth, benchmarks, goals, insights, readiness, sleep_analysis, stor
 from .chat import REPO_ROOT, _opencode_bin, _plain, resolve_model
 from .config import REGISTRY, REGISTRY_BY_NAME
 
-AGENT = "fitbit-analyst"
+AGENT = "fettle-analyst"
 _TIMEOUT = 180
 MAX_CARDS = 5
 

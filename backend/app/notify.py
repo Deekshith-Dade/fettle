@@ -112,7 +112,7 @@ def _send_macos(title: str, body: str) -> bool:
     # osascript inside string literals: escape backslashes/quotes defensively.
     esc = lambda s: s.replace("\\", "\\\\").replace('"', '\\"')  # noqa: E731
     script = (f'display notification "{esc(body)}" '
-              f'with title "fitbit+" subtitle "{esc(title)}" sound name "Glass"')
+              f'with title "fettle" subtitle "{esc(title)}" sound name "Glass"')
     try:
         proc = subprocess.run(["osascript", "-e", script],
                               capture_output=True, text=True, timeout=10)

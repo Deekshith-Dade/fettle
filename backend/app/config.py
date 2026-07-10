@@ -1,6 +1,6 @@
 """Settings and the data-type registry.
 
-The registry is the single source of truth for *what* fitbit-plus knows how to sync.
+The registry is the single source of truth for *what* fettle knows how to sync.
 Each entry maps a Google Health API data type to:
   - the OAuth scope it lives under,
   - how its timestamps are shaped (sample / interval / session),
@@ -116,7 +116,7 @@ class DataType:
         return self.api_name.replace("-", "_")
 
 
-# The starting registry. Add rows here to teach fitbit-plus a new metric.
+# The starting registry. Add rows here to teach fettle a new metric.
 REGISTRY: list[DataType] = [
     # --- Activity & fitness (interval types are dailyRollUp-only; no `list` support) ---
     DataType("steps", Scope.ACTIVITY, TimeKind.INTERVAL, "Steps", "steps", supports_intraday=False),

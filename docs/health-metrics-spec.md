@@ -1,6 +1,6 @@
 # Personal Health Dashboard — Evidence-Based Insight Spec
 
-> Compiled overnight as the evidence base for fitbit+'s insight layer. Every threshold,
+> Compiled overnight as the evidence base for fettle's insight layer. Every threshold,
 > formula, and reference value the app uses traces back to a citation here. Read it when you
 > want to know *why* a number is where it is — and where the honest uncertainty lives.
 >
@@ -78,7 +78,7 @@ solidly recovered; slope 13 aligns with WHOOP's bands (`s≥67`≈z≥+0.5, `s<3
 **Bands:** ≥85 Primed · 67–84 Ready · 50–66 Moderate · 34–49 Low · <34 Compromised. Always show the
 7-day trend and which sub-score dragged it down.
 
-> fitbit+'s existing `readiness.py` already does personal-baseline, HRV-weighted scoring. The
+> fettle's existing `readiness.py` already does personal-baseline, HRV-weighted scoring. The
 > illness flag, saturation guard, and respiratory-rate input above are the highest-value *future*
 > upgrades.
 
@@ -126,7 +126,7 @@ efficiency **≥85% good, 90–95% optimal**; latency **10–20 min ideal**, fla
 same sleep/wake state 24 h apart. **UK Biobank: most- vs least-regular quintile had 20–48% lower
 mortality — regularity beat duration** ([Windred 2024](https://academic.oup.com/sleep/article/47/1/zsad253/7280269)).
 Cheap proxies without per-minute hypnograms: SD of midsleep time, or social jetlag (target <1 h).
-*(fitbit+ uses nightly-duration spread as its available proxy.)*
+*(fettle uses nightly-duration spread as its available proxy.)*
 
 **Sleep debt:** `Σ max(0, need − actual)` over a **rolling 14 days** ([Van Dongen 2003](https://www.med.upenn.edu/uep/assets/user-content/documents/Van_Dongen_Dinges_Sleep_26_3_2003.pdf)).
 **Recovery is asymmetric — one long night doesn't clear it.**

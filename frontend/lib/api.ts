@@ -1,4 +1,4 @@
-// Tiny client for the fitbit-plus FastAPI backend.
+// Tiny client for the fettle FastAPI backend.
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
 export type DataTypeInfo = {

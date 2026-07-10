@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="fitbit-plus", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="fettle", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -81,7 +81,7 @@ def auth_callback(request: Request) -> HTMLResponse:
     except auth.AuthError as exc:
         raise HTTPException(400, str(exc))
     return HTMLResponse(
-        "<h2>fitbit-plus connected ✅</h2>"
+        "<h2>fettle connected ✅</h2>"
         "<p>Token stored. You can close this tab and run a sync.</p>"
     )
 

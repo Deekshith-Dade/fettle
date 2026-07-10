@@ -1665,7 +1665,7 @@ export default function Dashboard() {
       <div className="topbar">
         <div className="wordmark">
           <span className="dot" />
-          <h1>fitbit<em>+</em></h1>
+          <h1>fettle</h1>
         </div>
         <div className="controls">
           <button className="searchpill" onClick={() => setPaletteOpen(true)}
@@ -1964,7 +1964,7 @@ export default function Dashboard() {
           })}
 
           <footer className="foot">
-            <span>fitbit+ · your data, kept close</span>
+            <span>fettle · your data, kept close</span>
             <span>{types.length} metrics registered{lastSynced ? ` · synced ${relTime(lastSynced)}` : ""}</span>
           </footer>
         </>
