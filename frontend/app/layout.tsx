@@ -27,10 +27,12 @@ export const viewport: Viewport = {
   ],
 };
 
-// Resolve the theme (saved choice, else system) before first paint — no flash of the
-// wrong palette. Mirrors the toggle logic in the dashboard.
+// Resolve the theme (?theme= override, else saved choice, else system) before first
+// paint — no flash of the wrong palette. Mirrors the toggle logic in the dashboard.
+// The URL override is transient (never persisted): it exists for sharing/screenshots.
 const themeScript =
-  `(function(){try{var t=localStorage.getItem('theme');` +
+  `(function(){try{var q=new URLSearchParams(location.search).get('theme');` +
+  `var t=(q==='light'||q==='dark')?q:localStorage.getItem('theme');` +
   `var d=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';` +
   `document.documentElement.setAttribute('data-theme',(t==='light'||t==='dark')?t:d);}catch(e){}})();`;
 

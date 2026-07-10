@@ -11,6 +11,61 @@ never leaving it except to talk to Google.
 > runs in *Testing* mode with yourself as the only test user, so there's no
 > third-party security review and no server-side anything.
 
+## The tour
+
+*(All real data — mine. That's rather the point.)*
+
+**Overview** — the day's readiness, what's driving it, the 28-day strip, and your goals right below:
+
+![Overview](docs/screenshots/overview.png)
+
+**The AI coach** answers with live widgets, not prose about numbers. Ask to *see* something
+and it renders the chart inline — here: a metric-history chart, a stat tile, and a peer-benchmark
+band, all from one question, each fetched live by the frontend:
+
+![Coach rendering widgets](docs/screenshots/coach-top.png)
+
+Follow-ups keep the session: it reads the engine (see the tool chips), overlays two metrics on a
+dual-axis chart, and reasons about what moved what — honestly (`r = -0.50` is an association,
+and it says so). Next to it, the **daily briefing**: after each sync, an analyst model turns the
+computed evidence into a morning read:
+
+<p>
+<img src="docs/screenshots/coach-mid.png" width="49.5%" alt="Coach comparison chart with tool chips" />
+<img src="docs/screenshots/insights.png" width="49.5%" alt="LLM daily briefing" />
+</p>
+
+**Every metric drills down** (30/90-day stats, personal best, baseline) and **⌘K jumps anywhere**
+— fuzzy search over all 40 registered metrics, with live sparklines in the results:
+
+<p>
+<img src="docs/screenshots/drilldown.png" width="49.5%" alt="Metric drill-down drawer" />
+<img src="docs/screenshots/palette.png" width="49.5%" alt="Command palette" />
+</p>
+
+**Sleep deep-dive** (stage mix vs evidence-based targets, 14-night debt, consistency) and
+**Standing** — where you sit on cited reference bands, each with the next rung to reach for:
+
+<p>
+<img src="docs/screenshots/sleep.png" width="49.5%" alt="Sleep deep-dive" />
+<img src="docs/screenshots/standing.png" width="49.5%" alt="Peer benchmarks" />
+</p>
+
+**Workouts** (weekly volume, activity mix, every synced session) and **Goals** with streaks and
+28-day adherence, sorted worst-first so the work finds you:
+
+<p>
+<img src="docs/screenshots/workouts.png" width="49.5%" alt="Workouts view" />
+<img src="docs/screenshots/goals.png" width="49.5%" alt="Goals view" />
+</p>
+
+And yes, it does light mode — system-detected with a manual toggle:
+
+<p>
+<img src="docs/screenshots/metrics-light.png" width="49.5%" alt="Metrics in light theme" />
+<img src="docs/screenshots/overview-light.png" width="49.5%" alt="Overview in light theme" />
+</p>
+
 ## What's inside
 
 - **Sync engine** — incremental per-type watermarks over 30+ Google Health data types:
@@ -18,7 +73,9 @@ never leaving it except to talk to Google.
   sleep / exercise sessions, including per-workout detail.
 - **Dashboard** (Next.js) — Overview with a readiness hero and your goals, then
   Insights, Sleep deep-dive, Workouts, Standing (peer benchmarks), and a Metrics
-  drill-down for every synced type. Light/dark themes, ⌘K command palette.
+  drill-down for every synced type. Light/dark themes, ⌘K command palette, and
+  deep-linkable state (`?v=` view, `?m=` metric drawer, `/coach?c=` conversation,
+  `?theme=` override).
 - **Derived metrics, formulas in the open** — Readiness (0–100 recovery index vs your
   own 28-day baseline), Sleep Score, TRIMP-style Cardio Load. Every threshold and
   weighting traces to a citation in [`docs/health-metrics-spec.md`](docs/health-metrics-spec.md).

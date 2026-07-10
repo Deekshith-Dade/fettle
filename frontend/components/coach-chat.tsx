@@ -264,6 +264,9 @@ export default function CoachChat() {
 
   useEffect(() => {
     refreshConvs();
+    // Deep-link a conversation via ?c= — shareable, and screenshots can target one.
+    const c = Number(new URLSearchParams(window.location.search).get("c"));
+    if (Number.isFinite(c) && c > 0) selectConv(c);
     chatApi
       .models()
       .then((ms) => {
