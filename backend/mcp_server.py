@@ -129,8 +129,21 @@ def get_intraday(metric: MetricName, day: str) -> dict:
     except ValueError:
         return {"error": f"Invalid day '{day}'. Use ISO format YYYY-MM-DD."}
     points = store.query_intraday(name, d, d, max_points=1500)
+    if not points:
+        return {
+            "metric": name, "label": dt.label, "unit": dt.unit, "day": day, "points": [],
+            "note": "No intraday readings stored for this local day (yet) — the device "
+                    "may not have synced it to Google. Say so rather than describing it.",
+        }
     return {
         "metric": name, "label": dt.label, "unit": dt.unit, "day": day,
+        # The trace often ends before the day does (device→Google sync lag). Anchor the
+        # narration to this window so events after `to` aren't described as if visible.
+        "covers": {
+            "from": points[0]["ts"], "to": points[-1]["ts"],
+            "caveat": "UTC timestamps. Only describe what falls inside this window — "
+                      "anything later today has not synced yet.",
+        },
         "points": [{"ts": p["ts"], "value": p["value"]} for p in points],
     }
 

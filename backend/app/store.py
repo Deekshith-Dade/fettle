@@ -384,13 +384,27 @@ def query_daily_raw(data_type: str) -> list[dict]:
         ]
 
 
+def _local_day_utc_bound(d: date, *, end: bool = False) -> str:
+    """The UTC instant (as a stored-format `...Z` string) where local calendar day `d`
+    begins — or, with end=True, where the day AFTER it begins (an exclusive bound).
+
+    Intraday `ts` are stored as RFC3339 UTC strings, but people, the coach's tools, and
+    the chart widgets all think in *local* days. Slicing by date-prefix would select UTC
+    days — a 6 PM-to-6 PM window at UTC-6 — making the rendered trace disagree with the
+    local times narrated alongside it. Naive datetimes resolve via the system timezone,
+    which is the user's timezone in this self-hosted, runs-on-your-own-machine app."""
+    base = datetime.combine(d + timedelta(days=1) if end else d, datetime.min.time())
+    return base.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def query_intraday(
     data_type: str,
     start: date | None,
     end: date | None,
     max_points: int = 1500,
 ) -> list[dict]:
-    """Intraday series in range, evenly downsampled to at most `max_points` points.
+    """Intraday series across *local* days [start, end], evenly downsampled to at most
+    `max_points` points.
 
     Heart-rate alone is tens of thousands of points/day — sending them all is what made the
     dashboard crawl. We stride-sample in SQL (keep every Nth row, always the newest) so the
@@ -399,10 +413,10 @@ def query_intraday(
     params: list[Any] = [data_type]
     if start:
         where += " AND ts >= ?"
-        params.append(f"{start.isoformat()}T00:00:00")
+        params.append(_local_day_utc_bound(start))
     if end:
-        where += " AND ts <= ?"
-        params.append(f"{end.isoformat()}T23:59:59")
+        where += " AND ts < ?"
+        params.append(_local_day_utc_bound(end, end=True))
     with _connect() as conn:
         total = conn.execute(
             f"SELECT COUNT(*) FROM intraday_points {where}", params
