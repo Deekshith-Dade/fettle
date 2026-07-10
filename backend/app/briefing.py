@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from . import auth, benchmarks, goals, insights, readiness, sleep_analysis, store
-from .chat import REPO_ROOT, _opencode_bin, _plain, resolve_model
+from .chat import REPO_ROOT, _opencode_bin, _opencode_env, _plain, resolve_model
 from .config import REGISTRY, REGISTRY_BY_NAME
 
 AGENT = "fettle-analyst"
@@ -250,8 +250,8 @@ def _run_analyst(evidence_json: str, model: str, nudge: str = "") -> str:
     cmd = [_opencode_bin(), "run", "--format", "json", "--agent", AGENT,
            "-m", model, "--", message]
     try:
-        proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True,
-                              text=True, timeout=_TIMEOUT)
+        proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env=_opencode_env(),
+                              capture_output=True, text=True, timeout=_TIMEOUT)
     except subprocess.TimeoutExpired:
         raise BriefingError("analyst run timed out")
     if proc.returncode != 0:

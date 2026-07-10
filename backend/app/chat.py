@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -82,6 +83,14 @@ def _opencode_bin() -> str:
     return shutil.which("opencode") or str(Path.home() / ".opencode" / "bin" / "opencode")
 
 
+def _opencode_env() -> dict[str, str]:
+    """Env for every opencode subprocess. opencode trusts $PWD over its real cwd when
+    resolving the project — and uvicorn's inherited PWD is backend/, which silently
+    breaks the checkout-relative MCP command paths in opencode.json (the coach loses
+    all fettle_* tools). Pin PWD to match the cwd we spawn with."""
+    return {**os.environ, "PWD": str(REPO_ROOT)}
+
+
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
@@ -121,7 +130,7 @@ def _available_ids() -> list[str]:
     try:
         proc = subprocess.run(
             [_opencode_bin(), "models"], capture_output=True, text=True,
-            timeout=30, cwd=str(REPO_ROOT),
+            timeout=30, cwd=str(REPO_ROOT), env=_opencode_env(),
         )
         ids = [ln.strip() for ln in proc.stdout.splitlines()
                if ln.strip().startswith("opencode/")]
@@ -292,7 +301,7 @@ async def _turn(
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                cwd=str(REPO_ROOT),
+                cwd=str(REPO_ROOT), env=_opencode_env(),
             )
         except OSError as exc:
             yield _sse("error", {"message": f"Could not launch opencode: {exc}"})
