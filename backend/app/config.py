@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     db_file: Path = BASE_DIR / "health.db"
 
     # Must match a redirect URI registered on the OAuth client in Cloud Console.
-    oauth_redirect_uri: str = "http://localhost:8000/auth/callback"
+    oauth_redirect_uri: str = "http://localhost:8400/auth/callback"
 
     # How far back to reach on the very first sync of a data type.
     # Daily rollups are cheap (one point/day); intraday can be thousands of points/day
@@ -41,8 +41,13 @@ class Settings(BaseSettings):
     initial_backfill_days: int = 90
     initial_intraday_days: int = 3
 
-    # Allow the Next.js dev server to call the API.
-    cors_origins: list[str] = ["http://localhost:3000"]
+    # Allow the Next.js dev server to call the API. Both localhost and 127.0.0.1 so the
+    # dashboard works regardless of which the browser resolves to.
+    cors_origins: list[str] = ["http://localhost:3400", "http://127.0.0.1:3400"]
+
+
+    # Where the OAuth callback sends the browser after a successful connect.
+    frontend_url: str = "http://localhost:3400"
 
 
 settings = Settings()

@@ -156,54 +156,69 @@ Next.js chat UI ──SSE──▶ FastAPI /api/chat ──subprocess──▶ o
 
 ## Setup
 
-### 1. Google Cloud (one time)
+Prerequisite: a Fitbit account migrated to Google (mandatory since 2026-05-19) with
+data flowing into the Google Health / Fitbit app, plus Python 3.11+ and Node 18+.
 
-1. **Migrate your Fitbit account to a Google account** (mandatory by 2026-05-19 anyway).
-2. In [Google Cloud Console](https://console.cloud.google.com):
-   - Create a project and **enable the Google Health API**.
-   - Configure the **OAuth consent screen**: User type *External*, publishing status
-     left at **Testing**, and add your own email under **Test users**.
-   - Create an **OAuth client ID** (type *Web application*) with redirect URI
-     `http://localhost:8400/auth/callback` (must match `oauth_redirect_uri` in
-     `backend/.env`). Download the JSON.
-3. Save the downloaded file as `backend/credentials.json` (gitignored).
-
-> ⚠️ **Testing-mode caveat:** refresh tokens expire after **7 days**. The sync exits
-> with code 2 when that happens, and the daily briefing warns you *before* it does.
-> That's the trade-off for skipping Google's security review — fine for a personal
-> archive.
-
-### 2. Backend
+### Quickstart
 
 ```bash
-cd backend
-python3 -m venv .venv && source .venv/bin/activate   # Python 3.11+
-pip install -r requirements.txt
-
-cat > .env <<'EOF'
-oauth_redirect_uri=http://localhost:8400/auth/callback
-cors_origins=["http://localhost:3400","http://127.0.0.1:3400"]
-EOF
-
-python cli.py auth          # browser OAuth, stores token.json (gitignored)
-python cli.py sync          # pulls everything into health.db (gitignored)
-
-# --host :: binds IPv4 + IPv6. Without it uvicorn is IPv4-only and Safari — which
-# resolves `localhost` to ::1 first — loads the dashboard but never fills it in.
-uvicorn app.main:app --reload --host :: --port 8400
+git clone https://github.com/Deekshith-Dade/fettle.git && cd fettle
+ops/bootstrap.sh        # venv + all dependencies (safe to re-run)
+ops/dev.sh              # backend :8400 + dashboard :3400 — Ctrl-C stops both
 ```
 
-`python cli.py status` shows per-type sync watermarks; `python cli.py sync steps sleep`
-syncs specific types.
+Open **http://localhost:3400**. On a fresh install the dashboard opens as a
+**setup wizard** that walks you through the one-time Google part — creating your own
+free Cloud project, minting an OAuth client, connecting, first sync — and checks off
+each step live as you go. About ten minutes, once.
 
-### 3. Frontend
+> **Why my own Google Cloud project?** Every Google Health API scope is *restricted*:
+> shipping one shared app to the public would require Google's OAuth verification plus
+> an annual paid security assessment. Personal apps instead use the console's
+> **Testing** lane — your own project, your own keys, yourself as the only user. Your
+> data flows from Google straight to your machine; no one else's server or OAuth
+> client is ever involved.
+
+> ⚠️ **The one recurring chore:** Testing-lane refresh tokens expire every **7 days**.
+> The dashboard counts down in the top bar, the briefing warns you before it dies, and
+> reconnecting is a one-click handshake — nothing to re-tick. A scheduled sync exits
+> with code 2 when the token has died.
+
+### What the wizard walks you through
+
+For the curious — or the wizard-averse; every step also works headless:
+
+1. **Create a Google Cloud project** (free, any name) and **enable the Google Health
+   API** in it.
+2. **OAuth consent screen**: user type *External*, publishing status left at
+   **Testing**; add your own Gmail under **Test users**; under **Data access**, add
+   the four `googlehealth.*.readonly` scopes (activity, health metrics, sleep,
+   nutrition — the wizard has a copy-all button).
+3. **Create an OAuth client** (type *Web application*) whose only authorized redirect
+   URI is `http://localhost:8400/auth/callback`, and download its JSON.
+4. **Hand over the JSON** — pasted or dropped into the wizard, validated (with a
+   warning if the redirect URI looks wrong), stored as `backend/credentials.json`
+   (gitignored).
+5. **Connect Google** — one consent screen; tick every scope box.
+6. **First sync** — ~90 days of dailies plus recent full-resolution intraday, then
+   straight into the dashboard.
+
+Terminal equivalent: `cd backend && .venv/bin/python cli.py auth` then `cli.py sync`;
+`cli.py status` shows per-type watermarks, `cli.py sync steps sleep` syncs specific
+types. Moving machines? Copy `backend/credentials.json` + `backend/token.json` across
+and skip straight to sync.
+
+### Running by hand (what dev.sh does)
 
 ```bash
-cd frontend
-npm install
-cp .env.example .env.local
-npm run dev -- -p 3400      # dashboard at http://localhost:3400
+cd backend  && .venv/bin/python -m uvicorn app.main:app --reload --host :: --port 8400
+cd frontend && npm run dev -- -p 3400
 ```
+
+`--host ::` binds IPv4 + IPv6. Without it uvicorn is IPv4-only and Safari — which
+resolves `localhost` to ::1 first — loads the dashboard but never fills it in. Ports
+and origins all default correctly now; `backend/.env.example` and
+`frontend/.env.example` document the overrides if you need different ones.
 
 ### 4. AI coach (optional — everything else works without it)
 
@@ -220,27 +235,27 @@ python3 -m venv .venv-mcp
 .venv-mcp/bin/pip install mcp pydantic-settings
 ```
 
-Then point `opencode.json` (repo root) at **your** checkout — the MCP `command`
-paths are absolute. The agent personas live in `.opencode/agent/`
-(`fettle-coach` for chat, `fettle-analyst` for the briefings); both default to a
-free model, and the backend falls back automatically when the free-model lineup
-rotates.
+Nothing else to configure: `opencode.json` (repo root) registers the MCP server with
+checkout-relative paths, and the backend always launches opencode from the repo root.
+(Running `opencode` by hand? Do it from the repo root so those paths resolve.) The
+agent personas live in `.opencode/agent/` (`fettle-coach` for chat, `fettle-analyst`
+for the briefings); both default to a free model, and the backend falls back
+automatically when the free-model lineup rotates.
 
 ### Scheduled sync + notifications (optional)
 
-`ops/com.fettle.sync.plist` runs `cli.py sync` every 6 hours via launchd. Each run
-also refreshes the daily briefing (and the weekly retrospective on Sundays), then
-sends a macOS notification if — and only if — something needs attention: token
-about to expire, the multi-vital early-warning firing, or a broken goal streak.
-Edit the two absolute paths to your checkout, then:
-
 ```bash
-cp ops/com.fettle.sync.plist ~/Library/LaunchAgents/
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.fettle.sync.plist
+ops/install-sync.sh     # generates the launchd job for this checkout and loads it
 ```
 
-Logs land in `~/Library/Logs/fettle-sync.log`; exit code 2 in the log means
-the 7-day token died — re-run `python cli.py auth`.
+Syncs every 6 hours. Each run also refreshes the daily briefing (and the weekly
+retrospective on Sundays), then sends a macOS notification if — and only if —
+something needs attention: token about to expire, the multi-vital early-warning
+firing, or a broken goal streak.
+
+Logs land in `~/Library/Logs/fettle-sync.log`; exit code 2 in the log means the
+7-day token died — reconnect from the dashboard. Remove the job any time with
+`launchctl bootout gui/$(id -u)/com.fettle.sync`.
 
 ## Repo map
 
@@ -272,7 +287,9 @@ frontend/
 docs/
   health-metrics-spec.md  The cited evidence base for every formula and threshold
 ops/
-  com.fettle.sync.plist  launchd schedule (sync → briefings → notifications)
+  bootstrap.sh          One command from fresh clone to runnable app
+  dev.sh                Start both servers (backend :8400, dashboard :3400)
+  install-sync.sh       Generate + load the 6-hourly launchd sync for this checkout
 ```
 
 ## Gotchas

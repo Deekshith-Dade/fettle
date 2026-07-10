@@ -570,6 +570,12 @@ def delete_goal(goal_id: int) -> None:
         conn.execute("DELETE FROM goals WHERE id=?", (goal_id,))
 
 
+def has_any_data() -> bool:
+    """Whether any daily metric has ever landed — false means brand-new install."""
+    with _connect() as conn:
+        return conn.execute("SELECT 1 FROM daily_metrics LIMIT 1").fetchone() is not None
+
+
 def sync_status() -> list[dict]:
     with _connect() as conn:
         return [

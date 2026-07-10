@@ -76,14 +76,51 @@ def login() -> RedirectResponse:
 @app.get("/auth/callback", response_class=HTMLResponse)
 def auth_callback(request: Request) -> HTMLResponse:
     # The full request URL carries the ?code=&state= that the code exchange needs.
+    # Browser-facing endpoint: render HTML for both outcomes, not JSON.
     try:
         auth.exchange_code(str(request.url))
+    except Exception as exc:  # covers AuthError + oauthlib denials (user hit Cancel)
+        return HTMLResponse(
+            "<h2>fettle — connection failed</h2>"
+            f"<p>{exc}</p>"
+            f'<p><a href="{settings.frontend_url}">Back to fettle</a> and try again.</p>',
+            status_code=400,
+        )
+    # Land back in the app. A meta-refresh instead of a 307 so that if the frontend
+    # isn't running the user still sees a success page (the token IS stored).
+    return HTMLResponse(
+        f'<meta http-equiv="refresh" content="0;url={settings.frontend_url}/?connected=1">'
+        "<h2>fettle connected ✅</h2>"
+        f'<p>Token stored. <a href="{settings.frontend_url}/?connected=1">Open fettle</a>.</p>'
+    )
+
+
+# --- first-run setup ------------------------------------------------------------
+
+@app.get("/api/setup/status")
+def setup_status() -> dict:
+    """Everything the first-run wizard needs to render its checklist."""
+    return {
+        "credentials": auth.client_credentials_info(),
+        "authenticated": auth.has_valid_token(),
+        "token_days_left": auth.token_days_left(),
+        "has_data": store.has_any_data(),
+        "redirect_uri": settings.oauth_redirect_uri,
+        "scopes": config.AUTH_SCOPES,
+    }
+
+
+class CredentialsIn(BaseModel):
+    json_text: str
+
+
+@app.post("/api/setup/credentials")
+def setup_credentials(body: CredentialsIn) -> dict:
+    try:
+        info, warnings = auth.save_client_credentials(body.json_text)
     except auth.AuthError as exc:
         raise HTTPException(400, str(exc))
-    return HTMLResponse(
-        "<h2>fettle connected ✅</h2>"
-        "<p>Token stored. You can close this tab and run a sync.</p>"
-    )
+    return {"ok": True, "credentials": info, "warnings": warnings}
 
 
 # --- sync --------------------------------------------------------------------

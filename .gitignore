@@ -1,6 +1,7 @@
 # Secrets & local data — never commit these
 backend/credentials.json
 backend/token.json
+backend/token_meta.json
 backend/*.db
 backend/.env
 backend/uploads/

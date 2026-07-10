@@ -4,8 +4,8 @@
     "fettle": {
       "type": "local",
       "command": [
-        "/Users/deekshith/Documents/Projects/agents/claude-agents/fettle/backend/.venv-mcp/bin/python",
-        "/Users/deekshith/Documents/Projects/agents/claude-agents/fettle/backend/mcp_server.py"
+        "backend/.venv-mcp/bin/python",
+        "backend/mcp_server.py"
       ],
       "enabled": true
     }

@@ -1,5 +1,5 @@
 // Tiny client for the fettle FastAPI backend.
-const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8400";
 
 export type DataTypeInfo = {
   name: string;
@@ -154,6 +154,26 @@ async function get<T>(path: string): Promise<T> {
   return res.json();
 }
 
+// --- first-run setup -------------------------------------------------------------
+
+export type SetupCredentials = {
+  present: boolean;
+  valid?: boolean;
+  client_type?: "web" | "installed";
+  client_id_hint?: string;
+  redirect_uris?: string[];
+  error?: string;
+};
+
+export type SetupStatus = {
+  credentials: SetupCredentials;
+  authenticated: boolean;
+  token_days_left: number | null;
+  has_data: boolean;
+  redirect_uri: string;
+  scopes: string[];
+};
+
 export const api = {
   health: () =>
     get<{ status: string; authenticated: boolean; token_days_left: number | null }>(
@@ -183,6 +203,17 @@ export const api = {
     );
   },
   loginUrl: () => `${BASE}/auth/login`,
+  setupStatus: () => get<SetupStatus>("/api/setup/status"),
+  saveCredentials: async (jsonText: string) => {
+    const res = await fetch(`${BASE}/api/setup/credentials`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ json_text: jsonText }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.detail ?? `credentials -> ${res.status}`);
+    return data as { ok: boolean; credentials: SetupCredentials; warnings: string[] };
+  },
   triggerSync: (): Promise<SyncReport> =>
     fetch(`${BASE}/api/sync`, { method: "POST" }).then((r) => r.json()),
   readiness: () =>

@@ -13,9 +13,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api, BenchmarksResponse, Briefing, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, SleepDetail, Workout, WorkoutDetail } from "@/lib/api";
+import { api, BenchmarksResponse, Briefing, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, SetupStatus, SleepDetail, Workout, WorkoutDetail } from "@/lib/api";
 import { BenchmarksView, SleepView, SleepTeaser, StandingTeaser } from "@/components/insights-views";
 import { CommandPalette } from "@/components/command-palette";
+import { SetupWizard } from "@/components/setup-wizard";
 
 /* ————— configuration ————— */
 
@@ -1348,6 +1349,7 @@ function Drawer({
 
 export default function Dashboard() {
   const [authed, setAuthed] = useState<boolean | null>(null);
+  const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [tokenDays, setTokenDays] = useState<number | null>(null);
   const [types, setTypes] = useState<DataTypeInfo[]>([]);
   const [syncing, setSyncing] = useState(false);
@@ -1396,6 +1398,19 @@ export default function Dashboard() {
         const h = await api.health();
         setAuthed(h.authenticated);
         setTokenDays(h.token_days_left);
+        // First-run detection: an empty ledger routes to the setup wizard instead of
+        // the dashboard. Fail open (has_data: true) so an existing install is never
+        // trapped in the wizard by a hiccup on this one endpoint.
+        api.setupStatus().then(setSetup).catch(() =>
+          setSetup({
+            credentials: { present: false },
+            authenticated: h.authenticated,
+            token_days_left: h.token_days_left,
+            has_data: true,
+            redirect_uri: "http://localhost:8400/auth/callback",
+            scopes: [],
+          })
+        );
         const [dts, bulk, r, ins, rec, bm, sd] = await Promise.all([
           api.dataTypes(),
           api.dailyBulk(),
@@ -1432,6 +1447,18 @@ export default function Dashboard() {
     else url.searchParams.delete("m");
     window.history.replaceState(null, "", url);
   }, [open]);
+
+  // Returning from the Google consent round-trip (?connected=1): acknowledge, clean URL.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("connected")) {
+      url.searchParams.delete("connected");
+      window.history.replaceState(null, "", url);
+      setSyncFlash("Google connected ✓");
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+      flashTimer.current = setTimeout(() => setSyncFlash(null), 5000);
+    }
+  }, []);
 
   // Deep-link the active tab via ?v= so views are bookmarkable and browser back works.
   useEffect(() => {
@@ -1658,7 +1685,10 @@ export default function Dashboard() {
     return () => window.removeEventListener("keydown", onKey);
   }, [paletteOpen]);
 
-  const loading = authed === null && !error;
+  // Wait for both health and setup-status before rendering: the wizard-or-dashboard
+  // decision needs setup.has_data, and flashing the wrong one first reads as a glitch.
+  const loading = (authed === null || setup === null) && !error;
+  const firstRun = setup !== null && !setup.has_data;
 
   return (
     <div className="shell">
@@ -1730,8 +1760,25 @@ export default function Dashboard() {
         </div>
       )}
 
-      {!loading && (
+      {/* ———— first run: the ledger is empty — walk through connecting Google ———— */}
+      {!loading && firstRun && setup && <SetupWizard initial={setup} />}
+
+      {!loading && !firstRun && (
         <>
+          {/* ———— weekly-handshake band: token died but the ledger has data ———— */}
+          {authed === false && (
+            <div className="reband rise">
+              <div className="reband-copy">
+                <p className="reband-title">The weekly Google handshake is due.</p>
+                <p className="reband-sub">
+                  Testing-mode tokens expire every 7 days — syncing is paused until you
+                  reconnect. One click, nothing to re-tick.
+                </p>
+              </div>
+              <a className="btn btn-lime" href={api.loginUrl()}>Reconnect Google</a>
+            </div>
+          )}
+
           {/* ———— tab bar ———— */}
           <nav ref={navRef} className={`secnav${navStuck ? " stuck" : ""}`} aria-label="Views">
             {tabs.map((t) => (

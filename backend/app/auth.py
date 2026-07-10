@@ -132,3 +132,68 @@ def has_valid_token() -> bool:
         return True
     except AuthError:
         return False
+
+
+# --- OAuth-client credentials intake (first-run setup) -------------------------
+
+def client_credentials_info() -> dict:
+    """Best-effort introspection of credentials.json for the setup UI."""
+    path = settings.credentials_file
+    if not path.exists():
+        return {"present": False}
+    try:
+        raw = json.loads(path.read_text())
+    except ValueError:
+        return {"present": True, "valid": False, "error": "credentials.json is not valid JSON."}
+    kind = "web" if "web" in raw else "installed" if "installed" in raw else None
+    if kind is None:
+        return {
+            "present": True, "valid": False,
+            "error": 'Unrecognized shape — expected the OAuth client JSON from Cloud Console (top-level "web" key).',
+        }
+    body = raw[kind]
+    cid = body.get("client_id", "")
+    return {
+        "present": True,
+        "valid": bool(cid and body.get("client_secret")),
+        "client_type": kind,
+        # The id's numeric project prefix is enough to recognize "yes, that one".
+        "client_id_hint": cid[:16] + "…" if len(cid) > 16 else cid,
+        "redirect_uris": body.get("redirect_uris", []),
+    }
+
+
+def save_client_credentials(text: str) -> tuple[dict, list[str]]:
+    """Validate a pasted OAuth-client JSON and persist it as credentials.json.
+
+    Returns (info, warnings). Raises AuthError with an actionable message when the
+    paste can't work at all. A missing redirect URI is only a warning: the JSON
+    reflects the console at download time, and Google checks the live registration.
+    """
+    try:
+        raw = json.loads(text)
+    except ValueError:
+        raise AuthError("That isn't valid JSON — paste the whole file Google gave you.")
+    kind = "web" if "web" in raw else "installed" if "installed" in raw else None
+    if kind is None:
+        raise AuthError(
+            'Expected the OAuth client JSON downloaded from Cloud Console — it has a '
+            'top-level "web" key. (Did you paste a service-account key or token instead?)'
+        )
+    body = raw[kind]
+    if not body.get("client_id") or not body.get("client_secret"):
+        raise AuthError("The JSON is missing client_id or client_secret.")
+    warnings: list[str] = []
+    if kind == "installed":
+        warnings.append(
+            "This is a Desktop-type client. It can work, but a Web application client "
+            "with the redirect URI registered is the tested path."
+        )
+    elif settings.oauth_redirect_uri not in body.get("redirect_uris", []):
+        warnings.append(
+            f"This client JSON doesn't list {settings.oauth_redirect_uri} as an authorized "
+            "redirect URI. If you added it in the console after downloading, you're fine; "
+            "otherwise Google will refuse the login (redirect_uri_mismatch)."
+        )
+    settings.credentials_file.write_text(json.dumps(raw, indent=2))
+    return client_credentials_info(), warnings
