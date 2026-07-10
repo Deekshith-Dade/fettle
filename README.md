@@ -257,6 +257,19 @@ Logs land in `~/Library/Logs/fettle-sync.log`; exit code 2 in the log means the
 7-day token died — reconnect from the dashboard. Remove the job any time with
 `launchctl bootout gui/$(id -u)/com.fettle.sync`.
 
+### Access it from your phone (optional)
+
+Put the machine on a [Tailscale](https://tailscale.com) tailnet (`brew install --cask
+tailscale-app`, sign in, and install the Tailscale app on your phone with the same
+account). Then open `http://<machine-name>.<tailnet>.ts.net:3400` from anywhere — the
+dashboard derives its API base from whichever host served it, and the backend accepts
+private tailnet/LAN origins (`cors_origin_regex` in `backend/app/config.py`). Nothing
+is exposed to the public internet; it's WireGuard between your own devices.
+
+One caveat: the Google OAuth redirect URI is `localhost`, so **connecting/re-authing
+happens on the machine itself** — do the weekly handshake there; reading and the coach
+work from any device.
+
 ## Repo map
 
 ```

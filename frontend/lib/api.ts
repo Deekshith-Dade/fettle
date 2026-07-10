@@ -1,5 +1,12 @@
 // Tiny client for the fettle FastAPI backend.
-const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8400";
+// Default: the same host the dashboard was loaded from, port 8400 — so localhost works
+// at the desk and the Mac's Tailscale name/IP works from a phone, with zero config.
+// Set NEXT_PUBLIC_API_BASE only to override (e.g. backend on a different machine).
+const BASE =
+  process.env.NEXT_PUBLIC_API_BASE ??
+  (typeof window !== "undefined"
+    ? `${window.location.protocol}//${window.location.hostname}:8400`
+    : "http://localhost:8400");
 
 export type DataTypeInfo = {
   name: string;

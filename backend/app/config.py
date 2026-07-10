@@ -45,6 +45,17 @@ class Settings(BaseSettings):
     # dashboard works regardless of which the browser resolves to.
     cors_origins: list[str] = ["http://localhost:3400", "http://127.0.0.1:3400"]
 
+    # Private-network origins may also call the API: the dashboard loaded over Tailscale
+    # (100.64/10 CGNAT IPs, MagicDNS *.ts.net names) or the home LAN derives its API base
+    # from the same host it was served from. Never widen this to a public pattern.
+    cors_origin_regex: str = (
+        r"^https?://("
+        r"localhost|127\.0\.0\.1|\[::1\]"
+        r"|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}"  # Tailscale 100.64/10
+        r"|[A-Za-z0-9-]+\.[A-Za-z0-9-]+\.ts\.net"                     # MagicDNS names
+        r"|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"  # home LAN
+        r")(:\d+)?$"
+    )
 
     # Where the OAuth callback sends the browser after a successful connect.
     frontend_url: str = "http://localhost:3400"
