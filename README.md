@@ -8,58 +8,59 @@ never leaving it except to talk to Google.
 
 > The Google Health API replaces the legacy Fitbit Web API (full shutdown Sept 2026).
 > This project is built for **personal, single-user** use: your OAuth consent screen
-> runs in *Testing* mode with yourself as the only test user, so there's no
-> third-party security review and no server-side anything.
+> runs in *Testing* mode with yourself as the only test user, so there is no
+> third-party security review and no server component.
 
-## The tour
+## Screenshots
 
-*(All real data — mine. That's rather the point.)*
+All screenshots show the app running against real synced data.
 
-**Overview** — the day's readiness, what's driving it, the 28-day strip, and your goals right below:
+**Overview** — today's readiness score, its component drivers, the 28-day history, and goal status:
 
 ![Overview](docs/screenshots/overview.png)
 
-**The AI coach** answers with live widgets, not prose about numbers. Ask to *see* something
-and it renders the chart inline — here: a metric-history chart, a stat tile, and a peer-benchmark
-band, all from one question, each fetched live by the frontend:
+**AI coach** — answers include live inline widgets. A single question here produces a
+metric-history chart, a stat tile, and a peer-benchmark band, each rendered and fetched
+by the frontend:
 
 ![Coach rendering widgets](docs/screenshots/coach-top.png)
 
-Follow-ups keep the session: it reads the engine (see the tool chips), overlays two metrics on a
-dual-axis chart, and reasons about what moved what — honestly (`r = -0.50` is an association,
-and it says so). Next to it, the **daily briefing**: after each sync, an analyst model turns the
-computed evidence into a morning read:
+**Tool orchestration and the daily briefing** — follow-up questions continue the session.
+The tool chips show each engine call behind the dual-axis comparison, and the reply frames
+the correlation (`r = -0.50`) as an association, not a cause. Right: the briefing generated
+after each sync from the engine's computed evidence:
 
 <p>
 <img src="docs/screenshots/coach-mid.png" width="49.5%" alt="Coach comparison chart with tool chips" />
 <img src="docs/screenshots/insights.png" width="49.5%" alt="LLM daily briefing" />
 </p>
 
-**Every metric drills down** (30/90-day stats, personal best, baseline) and **⌘K jumps anywhere**
-— fuzzy search over all 40 registered metrics, with live sparklines in the results:
+**Metric drill-down and command palette** — per-metric statistics (7/28-day averages, range,
+personal best) for every synced type, and ⌘K fuzzy search across all 40 registered metrics
+with live sparklines in the results:
 
 <p>
 <img src="docs/screenshots/drilldown.png" width="49.5%" alt="Metric drill-down drawer" />
 <img src="docs/screenshots/palette.png" width="49.5%" alt="Command palette" />
 </p>
 
-**Sleep deep-dive** (stage mix vs evidence-based targets, 14-night debt, consistency) and
-**Standing** — where you sit on cited reference bands, each with the next rung to reach for:
+**Sleep analysis and peer benchmarks** — stage mix against published targets, 14-night sleep
+debt and consistency; reference bands with the next threshold annotated and every value cited:
 
 <p>
 <img src="docs/screenshots/sleep.png" width="49.5%" alt="Sleep deep-dive" />
 <img src="docs/screenshots/standing.png" width="49.5%" alt="Peer benchmarks" />
 </p>
 
-**Workouts** (weekly volume, activity mix, every synced session) and **Goals** with streaks and
-28-day adherence, sorted worst-first so the work finds you:
+**Workouts and goals** — weekly volume, 30-day activity mix, and the per-session log; goal
+cards with streaks and 28-day adherence, sorted by status:
 
 <p>
 <img src="docs/screenshots/workouts.png" width="49.5%" alt="Workouts view" />
 <img src="docs/screenshots/goals.png" width="49.5%" alt="Goals view" />
 </p>
 
-And yes, it does light mode — system-detected with a manual toggle:
+**Light theme** — follows the system setting, with a manual override:
 
 <p>
 <img src="docs/screenshots/metrics-light.png" width="49.5%" alt="Metrics in light theme" />
@@ -91,7 +92,7 @@ And yes, it does light mode — system-detected with a manual toggle:
   evidence into a morning read: headline, narrative, and 3–5 insight cards, every
   number traceable back to the evidence pack.
 
-## How the AI layer works (and why it costs $0)
+## How the AI layer works
 
 ```
 Next.js chat UI ──SSE──▶ FastAPI /api/chat ──subprocess──▶ opencode run (free Zen models)
@@ -104,8 +105,8 @@ Next.js chat UI ──SSE──▶ FastAPI /api/chat ──subprocess──▶ o
 ```
 
 - The app **never holds an LLM API key**. It shells out to the [opencode](https://opencode.ai)
-  CLI you're already logged into, using opencode Zen's free models — so an entire
-  coach conversation costs exactly $0.
+  CLI you're already logged into, using opencode Zen's free models, so there is no
+  per-conversation cost.
 - `backend/mcp_server.py` exposes the analysis engine as **21 MCP tools** (11 read,
   3 goal-write, 7 display). Metric arguments are closed enums generated from the
   data-type registry, so the model *cannot* hallucinate a metric name.
@@ -237,7 +238,7 @@ ops/
   com.fitbit-plus.sync.plist  launchd schedule
 ```
 
-## Gotchas (hard-won)
+## Gotchas
 
 - **Safari shows an empty dashboard** → start uvicorn with `--host ::` (dual-stack).
   Chrome silently falls back to IPv4 and hides the problem.
