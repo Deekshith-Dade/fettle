@@ -5,6 +5,7 @@ backend/*.db
 backend/.env
 backend/uploads/
 backend/last_sync_report.json
+backend/notify_state.json
 frontend/.env*.local
 
 # Python

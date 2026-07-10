@@ -950,6 +950,53 @@ body::before {
   font-size: 12.5px; color: var(--faint); text-decoration: none;
 }
 .side-foot:hover { color: var(--text); }
+.side-mem {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0; padding: 12px 18px; border: none; border-top: 1px solid var(--line);
+  background: none; font: inherit; font-size: 12.5px; color: var(--faint);
+  cursor: pointer; text-align: left; width: 100%;
+}
+.side-mem:hover { color: var(--text); }
+
+/* --- coach memory panel --- */
+.mem-scrim {
+  position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--ink) 62%, transparent);
+  backdrop-filter: blur(3px); animation: veilIn 0.16s var(--ease);
+}
+.mem-panel {
+  width: min(560px, calc(100vw - 32px)); max-height: min(70vh, 620px);
+  overflow-y: auto; border: 1px solid var(--line-strong); border-radius: 18px;
+  background: var(--panel); padding: 20px 22px 18px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.4);
+}
+.mem-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mem-head h3 { margin: 0; font-family: var(--font-display); font-size: 19px; font-weight: 620; }
+.mem-note { font-size: 12.5px; color: var(--muted); line-height: 1.55; margin: 8px 0 14px; }
+.mem-empty { font-size: 13px; color: var(--faint); margin: 12px 0 6px; }
+.mem-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.mem-row {
+  display: grid; grid-template-columns: auto 1fr auto auto; gap: 12px; align-items: center;
+  border: 1px solid var(--line); border-radius: 11px; background: var(--panel-hi);
+  padding: 9px 12px; font-size: 13px;
+}
+.mem-cat {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.13em; font-weight: 650;
+  color: var(--muted); border: 1px solid var(--line-strong); border-radius: 99px;
+  padding: 2.5px 8px; white-space: nowrap;
+}
+.mem-content { color: var(--text); line-height: 1.45; }
+.mem-since { font-size: 10.5px; color: var(--faint); white-space: nowrap; }
+.mem-forget {
+  border: none; background: none; color: var(--faint); cursor: pointer;
+  font-size: 12px; padding: 4px 6px; border-radius: 7px;
+}
+.mem-forget:hover { color: var(--rose, #f47a8f); background: var(--panel); }
+@media (max-width: 560px) {
+  .mem-row { grid-template-columns: 1fr auto; }
+  .mem-cat { justify-self: start; }
+  .mem-since { display: none; }
+}
 
 /* --- main column --- */
 .coach-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -1151,11 +1198,13 @@ body::before {
 /* --- workouts log (Metrics · Workouts group) --- */
 .wlog { display: flex; flex-direction: column; gap: 5px; margin-bottom: 20px; }
 .wlog-row {
-  display: grid; grid-template-columns: 128px minmax(110px, 0.6fr) 1fr;
+  display: grid; grid-template-columns: 128px minmax(110px, 0.6fr) 1fr 14px;
   gap: 16px; align-items: baseline;
   padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px;
   background: var(--panel); font-size: 13px;
   transition: border-color 0.15s, background 0.15s;
+  /* it's a button now (expandable) — neutralize the UA styling */
+  width: 100%; font-family: inherit; color: inherit; text-align: left; cursor: pointer;
 }
 .wlog-row:hover { border-color: var(--line-strong); background: var(--panel-hi); }
 .wlog-when { color: var(--text); font-weight: 550; white-space: nowrap; }
@@ -1172,7 +1221,40 @@ body::before {
   .wlog-row { grid-template-columns: 1fr auto; }
   .wlog-what { grid-column: 1; }
   .wlog-stats { grid-column: 1 / -1; justify-content: flex-start; }
+  .wlog-chev { display: none; }
+  .wdet { grid-template-columns: 1fr; }
 }
+
+/* --- workout drill-down (expandable session rows) --- */
+.wlog-chev {
+  color: var(--faint); font-size: 10px; align-self: center; justify-self: end;
+  transform: rotate(-90deg); transition: transform 0.18s var(--ease);
+}
+.wlog-chev.open { transform: none; }
+.wlog-item.open > .wlog-row {
+  border-radius: 12px 12px 0 0; border-bottom-color: transparent; background: var(--panel-hi);
+}
+.wdet {
+  display: grid; grid-template-columns: 1.55fr 1fr; gap: 6px 22px; align-items: start;
+  border: 1px solid var(--line-strong); border-top: 1px dashed var(--line);
+  border-radius: 0 0 12px 12px; background: var(--panel-hi);
+  padding: 13px 16px 15px; margin-top: -1px;
+}
+.wdet-skel { min-height: 110px; border-radius: 0 0 12px 12px; }
+.wdet .eyebrow { margin-bottom: 8px; }
+.wdet-nohr { font-size: 12.5px; align-self: center; }
+.wdet-side { display: flex; flex-direction: column; gap: 9px; padding-top: 2px; min-width: 0; }
+.wdet-stats { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 13px; }
+.wdet-stats b { font-weight: 620; font-variant-numeric: tabular-nums; }
+.wdet-stats i { font-style: normal; color: var(--faint); font-size: 10.5px; }
+.wdet-zstrip {
+  display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 1px;
+}
+.wdet-zstrip span { min-width: 3px; }
+.wdet-zlegend { display: flex; flex-wrap: wrap; gap: 3px 14px; font-size: 11px; color: var(--muted); }
+.wdet-zl { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.wdet-zl i { width: 8px; height: 8px; border-radius: 3px; }
+.wdet-vs { font-size: 11.5px; color: var(--faint); margin: 2px 0 0; line-height: 1.5; }
 
 /* --- workouts view (stats, volume, mix) --- */
 .wk-stats { margin-bottom: 22px; max-width: 620px; }
@@ -1231,6 +1313,9 @@ body::before {
 .briefing-meta {
   font-size: 11px; color: var(--faint); letter-spacing: 0.04em; margin: 16px 0 0;
 }
+.briefing-range { margin-left: 10px; color: var(--faint); letter-spacing: 0.02em; text-transform: none; }
+.briefing-weekly { margin-top: 18px; }
+.briefing-weekly .briefing-headline { font-size: 24px; }
 
 /* --- inline widgets (the coach's live visuals) --- */
 .cw {

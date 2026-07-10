@@ -13,7 +13,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api, BenchmarksResponse, Briefing, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, SleepDetail, Workout } from "@/lib/api";
+import { api, BenchmarksResponse, Briefing, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, SleepDetail, Workout, WorkoutDetail } from "@/lib/api";
 import { BenchmarksView, SleepView, SleepTeaser, StandingTeaser } from "@/components/insights-views";
 import { CommandPalette } from "@/components/command-palette";
 
@@ -429,23 +429,136 @@ function SleepStages({ cache, nights = 14 }: { cache: Record<string, Point[]>; n
 
 /* ————— workouts view (weekly stats, volume, mix, month-grouped log) ————— */
 
-function WorkoutRow({ w, delay }: { w: Workout; delay: number }) {
+// %HRmax bands, worst-first for the strip legend. Colors flip with the theme.
+function zoneMeta(light: boolean) {
+  return [
+    { key: "peak" as const, label: "Peak", color: light ? "#cf4d63" : "#f47a8f" },
+    { key: "cardio" as const, label: "Cardio", color: light ? "#a9710c" : "#f4c257" },
+    { key: "fat_burn" as const, label: "Fat burn", color: light ? "#5f8c0f" : "#cdf24e" },
+    { key: "light" as const, label: "Light", color: light ? "#9aa1ab" : "#5a616d" },
+  ];
+}
+
+function WorkoutDetailPanel({
+  w, detail, err, median,
+}: {
+  w: Workout;
+  detail: WorkoutDetail | null;
+  err: boolean;
+  median?: { min: number | null; kcal: number | null; n: number };
+}) {
+  const light = typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "light";
+  if (err) return <div className="wdet"><p className="muted">Couldn&apos;t load this session&apos;s detail.</p></div>;
+  if (!detail) return <div className="wdet wdet-skel" aria-hidden />;
+  const ci = chartInk();
+  const clock = (ts: string) => new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const zones = detail.zones_min;
+  const zTotal = zones.light + zones.fat_burn + zones.cardio + zones.peak;
+  const trace = detail.hr_trace.filter((p) => p.value != null);
+  const meta = zoneMeta(light);
   return (
-    <div className="wlog-row rise" style={{ animationDelay: `${delay}ms` }}>
-      <span className="wlog-when">
-        {fmtDay(w.day)}
-        <span className="wlog-time">
-          {new Date(w.start_local).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+    <div className="wdet">
+      {trace.length >= 5 ? (
+        <div className="wdet-chart">
+          <p className="eyebrow">Heart rate through the session</p>
+          <ResponsiveContainer width="100%" height={148}>
+            <AreaChart data={trace.map((p) => ({ x: p.ts, y: p.value }))} margin={{ left: -12, right: 6, top: 4 }}>
+              <CartesianGrid stroke={ci.grid} vertical={false} />
+              <XAxis dataKey="x" stroke={ci.axis} fontSize={10.5} minTickGap={52}
+                tickLine={false} axisLine={false} tickFormatter={(t) => clock(String(t))} />
+              <YAxis stroke={ci.axis} fontSize={10.5} width={38} domain={["auto", "auto"]}
+                tickLine={false} axisLine={false} />
+              <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: "#9aa1ab" }}
+                labelFormatter={(t) => clock(String(t))}
+                formatter={(v) => [`${formatNum(Number(v))} bpm`, "Heart rate"]} />
+              <Area type="monotone" dataKey="y" stroke={ci.cyan} fill={ci.cyan} fillOpacity={0.12}
+                strokeWidth={1.75} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} isAnimationActive={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      ) : (
+        <p className="muted wdet-nohr">No heart-rate samples landed inside this session&apos;s window.</p>
+      )}
+      <div className="wdet-side">
+        <div className="wdet-stats">
+          {detail.hr_max_session != null && (
+            <span><b>{formatNum(detail.hr_max_session)}</b> <i>bpm max</i></span>
+          )}
+          {w.avg_hr != null && <span><b>{formatNum(w.avg_hr)}</b> <i>bpm avg</i></span>}
+          {w.steps != null && w.steps > 0 && <span><b>{formatNum(w.steps)}</b> <i>steps</i></span>}
+        </div>
+        {zTotal > 0.4 && (
+          <>
+            <p className="eyebrow">Time in zone</p>
+            <div className="wdet-zstrip" aria-hidden>
+              {meta.map((z) =>
+                zones[z.key] > 0 ? (
+                  <span key={z.key} style={{ flexGrow: zones[z.key], background: z.color }} />
+                ) : null
+              )}
+            </div>
+            <div className="wdet-zlegend">
+              {meta.map((z) =>
+                zones[z.key] > 0 ? (
+                  <span className="wdet-zl" key={z.key}>
+                    <i style={{ background: z.color }} />
+                    {z.label} {formatNum(zones[z.key])}m
+                  </span>
+                ) : null
+              )}
+            </div>
+          </>
+        )}
+        {median && median.n >= 3 && median.min != null && w.duration_min != null && (
+          <p className="wdet-vs">
+            Your median {w.activity.toLowerCase()} ({median.n}×): {formatNum(median.min)} min
+            {median.kcal != null ? ` · ${formatNum(median.kcal)} kcal` : ""} — this one ran{" "}
+            {w.duration_min >= median.min * 1.15 ? "longer" : w.duration_min <= median.min * 0.85 ? "shorter" : "typical"}.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WorkoutRow({
+  w, median, delay,
+}: {
+  w: Workout;
+  median?: { min: number | null; kcal: number | null; n: number };
+  delay: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState<WorkoutDetail | null>(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    if (!open || detail || err) return;
+    api.workoutDetail(w.id).then(setDetail).catch(() => setErr(true));
+  }, [open, detail, err, w.id]);
+  return (
+    <div className={`wlog-item${open ? " open" : ""}`}>
+      <button
+        className="wlog-row rise" style={{ animationDelay: `${delay}ms` }}
+        onClick={() => setOpen((o) => !o)} aria-expanded={open}
+        title={open ? undefined : "Session detail — heart rate & zones"}
+      >
+        <span className="wlog-when">
+          {fmtDay(w.day)}
+          <span className="wlog-time">
+            {new Date(w.start_local).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+          </span>
         </span>
-      </span>
-      <span className="wlog-what">{w.activity}</span>
-      <span className="wlog-stats">
-        {w.duration_min != null && <em>{formatNum(w.duration_min)}<i>min</i></em>}
-        {w.distance_km != null && <em>{formatNum(w.distance_km)}<i>km</i></em>}
-        {w.calories != null && <em>{formatNum(w.calories)}<i>kcal</i></em>}
-        {w.avg_hr != null && <em>{formatNum(w.avg_hr)}<i>bpm avg</i></em>}
-        {w.azm != null && w.azm > 0 && <em>{formatNum(w.azm)}<i>AZM</i></em>}
-      </span>
+        <span className="wlog-what">{w.activity}</span>
+        <span className="wlog-stats">
+          {w.duration_min != null && <em>{formatNum(w.duration_min)}<i>min</i></em>}
+          {w.distance_km != null && <em>{formatNum(w.distance_km)}<i>km</i></em>}
+          {w.calories != null && <em>{formatNum(w.calories)}<i>kcal</i></em>}
+          {w.avg_hr != null && <em>{formatNum(w.avg_hr)}<i>bpm avg</i></em>}
+          {w.azm != null && w.azm > 0 && <em>{formatNum(w.azm)}<i>AZM</i></em>}
+        </span>
+        <span className={`wlog-chev${open ? " open" : ""}`} aria-hidden>▾</span>
+      </button>
+      {open && <WorkoutDetailPanel w={w} detail={detail} err={err} median={median} />}
     </div>
   );
 }
@@ -491,6 +604,23 @@ function WorkoutsView({ cache }: { cache: Record<string, Point[]> }) {
     }
     return [...by.entries()].map(([label, v]) => ({ label, ...v }))
       .sort((a, b) => b.min - a.min).slice(0, 6);
+  }, [items]);
+
+  // Per-activity medians — the "is this session typical for me?" yardstick.
+  const medians = useMemo(() => {
+    const by = new Map<string, Workout[]>();
+    for (const w of items ?? []) {
+      (by.get(w.activity) ?? by.set(w.activity, []).get(w.activity)!).push(w);
+    }
+    const med = (xs: number[]) =>
+      xs.length ? [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] : null;
+    return new Map(
+      [...by.entries()].map(([a, ws]) => [a, {
+        min: med(ws.map((w) => w.duration_min).filter((x): x is number => x != null)),
+        kcal: med(ws.map((w) => w.calories).filter((x): x is number => x != null)),
+        n: ws.length,
+      }])
+    );
   }, [items]);
 
   // Weekly workout volume (Mon-anchored) from the already-loaded daily series.
@@ -595,7 +725,7 @@ function WorkoutsView({ cache }: { cache: Record<string, Point[]> }) {
           return (
             <div key={w.id}>
               {head && <p className="wlog-month">{head}</p>}
-              <WorkoutRow w={w} delay={Math.min(i % PAGE, PAGE) * 22} />
+              <WorkoutRow w={w} median={medians.get(w.activity)} delay={Math.min(i % PAGE, PAGE) * 22} />
             </div>
           );
         })}
@@ -1423,6 +1553,24 @@ export default function Dashboard() {
     }
   }
 
+  // Weekly retrospective — same store, kind='weekly'; regenerated Sundays or on demand.
+  const [weeklyData, setWeeklyData] = useState<Briefing | null>(null);
+  const [weeklyBusy, setWeeklyBusy] = useState(false);
+  useEffect(() => {
+    api.weeklyBriefing().then((r) => setWeeklyData(r.briefing)).catch(() => {});
+  }, []);
+  async function refreshWeekly() {
+    setWeeklyBusy(true);
+    try {
+      const r = await api.refreshWeeklyBriefing();
+      setWeeklyData(r.briefing);
+    } catch {
+      /* keep the stored one */
+    } finally {
+      setWeeklyBusy(false);
+    }
+  }
+
   const openInfo = open ? infoByName[open] : null;
   // Ordered by daily flow: where you stand → what you're aiming at → what the engines
   // noticed → domain deep-dives → the raw catalog. Coach renders after these, last.
@@ -1724,6 +1872,45 @@ export default function Dashboard() {
                   </p>
                 </section>
               )}
+
+              <section className="briefing briefing-weekly rise" style={{ animationDelay: "30ms" }}>
+                <div className="briefing-head">
+                  <p className="eyebrow briefing-eyebrow">
+                    <span className="briefing-star" aria-hidden>✦</span> The week in review
+                    {weeklyData && (
+                      <span className="briefing-range">
+                        {fmtDay(new Date(new Date(weeklyData.day + "T12:00:00").getTime() - 6 * 864e5).toLocaleDateString("en-CA"))}
+                        {" – "}{fmtDay(weeklyData.day)}
+                      </span>
+                    )}
+                  </p>
+                  <button className="btn briefing-refresh" onClick={refreshWeekly} disabled={weeklyBusy}>
+                    {weeklyBusy && <span className="spinner" aria-hidden />}
+                    {weeklyBusy ? "Reviewing the week…" : weeklyData ? "Refresh" : "Generate"}
+                  </button>
+                </div>
+                {weeklyData ? (
+                  <>
+                    <h2 className="briefing-headline">{weeklyData.headline}</h2>
+                    <p className="briefing-narrative">{weeklyData.narrative}</p>
+                    <div className="insights-grid">
+                      {weeklyData.insights.map((ins, i) => (
+                        <InsightCard key={ins.id} ins={ins} onOpen={setOpen} delay={60 + i * 45} />
+                      ))}
+                    </div>
+                    <p className="briefing-meta">
+                      This week vs last, from the stored series · {weeklyData.model?.split("/").pop() ?? "llm"} ·
+                      updated {new Date(weeklyData.generated_at).toLocaleDateString([], { month: "short", day: "numeric" })}
+                    </p>
+                  </>
+                ) : (
+                  <p className="briefing-narrative">
+                    A written close-out of your week — what changed vs the week before,
+                    which goals moved, and the one thing to do differently. Regenerates
+                    every Sunday after sync.
+                  </p>
+                )}
+              </section>
 
               {insights.length > 0 && (
                 <section className="section rise" style={{ animationDelay: "40ms" }}>

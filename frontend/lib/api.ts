@@ -80,14 +80,36 @@ export type Workout = {
   azm: number | null;
 };
 
-/** LLM-synthesized daily briefing over the computed insight evidence. */
+/** Session drill-down: the summary row plus its intraday HR trace and time-in-zone. */
+export type WorkoutDetail = Workout & {
+  start_ts: string;
+  end_ts: string | null;
+  hr_trace: { ts: string; value: number }[];
+  hr_max_session: number | null;
+  hr_samples: number;
+  zones_min: { light: number; fat_burn: number; cardio: number; peak: number };
+  hr_max_basis: string;
+};
+
+/** LLM-synthesized briefing over the computed evidence (daily read or weekly retro). */
 export type Briefing = {
+  kind?: "daily" | "weekly";
   day: string;
   generated_at: string;
   model: string | null;
   headline: string;
   narrative: string;
   insights: Insight[];
+};
+
+/** A durable fact the chat coach saved (injury, schedule, preference, event). */
+export type CoachMemory = {
+  id: number;
+  created_at: string;
+  updated_at: string;
+  category: string;
+  content: string;
+  active: number;
 };
 
 // --- peer benchmarks ---
@@ -176,10 +198,18 @@ export const api = {
     }>("/api/readiness"),
   insights: () => get<{ insights: Insight[] }>("/api/insights"),
   workouts: (days = 60) => get<{ workouts: Workout[] }>(`/api/workouts?days=${days}`),
+  workoutDetail: (id: string) =>
+    get<WorkoutDetail>(`/api/workouts/detail?id=${encodeURIComponent(id)}`),
   briefing: () => get<{ briefing: Briefing | null }>("/api/briefing"),
   refreshBriefing: (): Promise<{ briefing: Briefing | null }> =>
     fetch(`${BASE}/api/briefing/refresh`, { method: "POST" }).then((r) => {
       if (!r.ok) throw new Error(`briefing refresh -> ${r.status}`);
+      return r.json();
+    }),
+  weeklyBriefing: () => get<{ briefing: Briefing | null }>("/api/briefing/weekly"),
+  refreshWeeklyBriefing: (): Promise<{ briefing: Briefing | null }> =>
+    fetch(`${BASE}/api/briefing/weekly/refresh`, { method: "POST" }).then((r) => {
+      if (!r.ok) throw new Error(`weekly refresh -> ${r.status}`);
       return r.json();
     }),
   coach: () => get<CoachResponse>("/api/coach"),
@@ -266,6 +296,9 @@ export const chatApi = {
     if (!res.ok) throw new Error(`upload failed (${res.status})`);
     return res.json();
   },
+  memories: () => get<{ memories: CoachMemory[] }>("/api/coach/memory"),
+  forgetMemory: (id: number) =>
+    fetch(`${BASE}/api/coach/memory/${id}`, { method: "DELETE" }).then((r) => r.json()),
 };
 
 /** POST a message and dispatch the SSE stream to `on.*` until the turn ends. */

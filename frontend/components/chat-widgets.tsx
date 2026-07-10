@@ -205,6 +205,53 @@ function ChartWidget({ metric, days }: { metric: string; days: number }) {
   );
 }
 
+/* ————— intraday: one metric's sub-daily trace ————— */
+
+function fmtClock(ts: string): string {
+  return new Date(ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+function IntradayWidget({ metric, day }: { metric: string; day: string }) {
+  const light = useThemeAttr() === "light";
+  const gid = useId();
+  const { data, err } = useCached(`intraday:${metric}:${day}`, () =>
+    api.intraday(metric, day, day, 900));
+  if (err) return <WErr msg={`Couldn't load the intraday ${metric} stream.`} />;
+  if (!data) return <Skel h={236} />;
+  const rows = data.points
+    .filter((p) => p.value != null && p.ts)
+    .map((p) => ({ x: p.ts!, y: p.value }));
+  if (rows.length < 5) return <WErr msg={`No intraday ${data.label} readings on ${fmtDayLong(day)}.`} />;
+  const ci = chartInk(light);
+  return (
+    <div className="cw">
+      <Head title={`${data.label} — through the day`}
+        sub={`${fmtDayLong(day)}${data.unit ? ` · ${data.unit}` : ""} · ${rows.length} samples`} />
+      <ResponsiveContainer width="100%" height={196}>
+        <AreaChart data={rows} margin={{ left: -8, right: 8, top: 6 }}>
+          <defs>
+            <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={ci.cyan} stopOpacity={0.3} />
+              <stop offset="100%" stopColor={ci.cyan} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid stroke={ci.grid} vertical={false} />
+          <XAxis dataKey="x" stroke={ci.axis} fontSize={11} minTickGap={56}
+            tickLine={false} axisLine={false} tickFormatter={(t) => fmtClock(String(t))} />
+          <YAxis stroke={ci.axis} fontSize={11} width={42} domain={["auto", "auto"]}
+            tickLine={false} axisLine={false} />
+          <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: "#9aa1ab" }}
+            labelFormatter={(t) => fmtClock(String(t))}
+            formatter={(val) => [`${formatNum(Number(val))}${data.unit ? ` ${data.unit}` : ""}`, data.label]} />
+          <Area type="monotone" dataKey="y" stroke={ci.cyan} fill={`url(#${gid})`}
+            strokeWidth={1.75} connectNulls dot={false} activeDot={{ r: 3, strokeWidth: 0 }}
+            isAnimationActive={false} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 /* ————— comparison: two metrics, dual axes ————— */
 
 function CompareWidget({ a, b, days }: { a: string; b: string; days: number }) {
@@ -463,6 +510,12 @@ export function ChatWidget({ spec }: { spec: ChatWidgetSpec }) {
     case "stat": {
       const metric = str(p.metric);
       return metric ? <StatWidget metric={metric} /> : null;
+    }
+    case "intraday": {
+      const metric = str(p.metric);
+      const rawDay = str(p.day);
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(rawDay) ? rawDay : localToday();
+      return metric ? <IntradayWidget metric={metric} day={day} /> : null;
     }
     case "readiness":
       return <ReadinessWidget />;

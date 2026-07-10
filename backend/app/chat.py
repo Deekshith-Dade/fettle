@@ -61,9 +61,13 @@ TOOL_LABELS = {
     "fitbit_get_benchmarks": "Peer benchmarks",
     "fitbit_get_sleep": "Sleep analysis",
     "fitbit_get_goals": "Goal tracker",
+    "fitbit_get_workouts": "Session log",
     "fitbit_create_goal": "Goal created",
     "fitbit_update_goal": "Goal updated",
     "fitbit_delete_goal": "Goal removed",
+    "fitbit_remember": "Saved to memory",
+    "fitbit_recall": "Memory recall",
+    "fitbit_forget": "Memory removed",
 }
 
 # Tool calls that change stored goals — the UI busts its goals-widget cache on these.

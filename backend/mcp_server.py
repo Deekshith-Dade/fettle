@@ -195,6 +195,63 @@ def get_workouts(days: int = 30) -> list[dict]:
     return store.query_workouts(days=days, limit=100)
 
 
+# --- memory: durable facts he tells you in chat ---------------------------------
+
+class MemoryCategory(str, Enum):
+    injury = "injury"          # pains, niggles, conditions to train around
+    schedule = "schedule"      # when he trains / sleeps / works
+    preference = "preference"  # likes, dislikes, how he wants to be coached
+    event = "event"            # upcoming or past life events that explain the data
+    other = "other"
+
+
+@mcp.tool()
+def remember(content: str, category: MemoryCategory = MemoryCategory.other) -> dict:
+    """Save a durable fact he just told you, so future conversations know it — injuries
+    ("left knee is tender"), schedule ("lifts Mon/Wed/Fri"), preferences, or events that
+    will explain the data ("marathon on Oct 12", "traveling next week").
+
+    One short sentence per memory, in his terms. Don't save what the data already shows
+    (metrics, scores) or one-off small talk. Confirm in one short line what you saved."""
+    content = " ".join(content.split()).strip()
+    if not content:
+        return {"error": "Nothing to save — pass the fact as `content`."}
+    if len(content) > 240:
+        return {"error": "Too long — condense to one sentence (≤240 chars)."}
+    dup = next((m for m in store.list_memories()
+                if m["content"].lower() == content.lower()), None)
+    if dup:
+        return {"ok": True, "id": dup["id"], "note": "Already saved — no duplicate created."}
+    mid = store.add_memory(content, category.value)
+    return {"ok": True, "id": mid, "saved": content}
+
+
+@mcp.tool()
+def recall() -> dict:
+    """What you've been told and saved so far (injuries, schedule, preferences, events),
+    with each memory's id and date. Call this at the START of a conversation before
+    advising, so your coaching respects what you already know. Also call it before
+    forget() to find the right id."""
+    mems = store.list_memories()
+    if not mems:
+        return {"memories": [], "note": "Nothing saved yet."}
+    return {"memories": [
+        {"id": m["id"], "category": m["category"], "content": m["content"],
+         "since": m["created_at"][:10]} for m in mems
+    ]}
+
+
+@mcp.tool()
+def forget(memory_id: int) -> dict:
+    """Remove a saved memory — when he says it no longer applies ("knee's fine now") or
+    asks you to forget something. Get the id from recall() first."""
+    mems = {m["id"]: m for m in store.list_memories()}
+    if memory_id not in mems:
+        return {"error": f"No active memory with id {memory_id} — call recall() for ids."}
+    store.forget_memory(memory_id)
+    return {"ok": True, "forgot": mems[memory_id]["content"]}
+
+
 # --- goal management (the only write tools; everything else is read-only) -------
 
 class Comparator(str, Enum):
@@ -329,6 +386,27 @@ def show_goals() -> str:
     """Show the user's active goals with live progress (adherence, streaks, status).
     Use when discussing goal progress."""
     return _shown("Goal progress overview")
+
+
+# Only metrics with a real sub-daily stream (heart-rate, SpO2 samples, HRV samples).
+IntradayMetric = Enum(
+    "IntradayMetric", {dt.field_name: dt.api_name for dt in REGISTRY if _has_intraday(dt)}
+)
+
+
+@mcp.tool()
+def show_intraday(metric: IntradayMetric, day: str = "") -> str:
+    """Show the sub-daily (within one day) trace of a metric inline — e.g. the actual
+    heart-rate curve through a workout or across a day. `day` is ISO 'YYYY-MM-DD';
+    empty means today. Pair with get_workouts: for "how was my run", find the session's
+    day and show the heart-rate trace for it, then interpret peaks and recovery."""
+    if day:
+        try:
+            date.fromisoformat(day)
+        except ValueError:
+            return f"[Invalid day '{day}' — use ISO YYYY-MM-DD or leave empty for today.]"
+    label = REGISTRY_BY_NAME[metric.value].label
+    return _shown(f"Intraday {label} trace for {day or 'today'}")
 
 
 if __name__ == "__main__":

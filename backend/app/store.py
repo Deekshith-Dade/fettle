@@ -56,6 +56,17 @@ CREATE TABLE IF NOT EXISTS goals (
     active     INTEGER NOT NULL DEFAULT 1
 );
 
+-- Durable facts the coach is told in chat (injuries, schedule, preferences). The coach
+-- recalls these at the start of a conversation; the briefing reads them as context.
+CREATE TABLE IF NOT EXISTS coach_memory (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    category   TEXT NOT NULL DEFAULT 'other',   -- injury|schedule|preference|event|other
+    content    TEXT NOT NULL,
+    active     INTEGER NOT NULL DEFAULT 1       -- soft delete: forgotten, not erased
+);
+
 -- Individual exercise sessions (the daily exercise-* metrics are their aggregates).
 CREATE TABLE IF NOT EXISTS workout_sessions (
     id           TEXT PRIMARY KEY,    -- API dataPoint name (stable across syncs)
@@ -409,6 +420,32 @@ def query_intraday(
         return [dict(r) for r in conn.execute(sql, [*params, stride]).fetchall()]
 
 
+def query_intraday_range(
+    data_type: str,
+    start_ts: str,
+    end_ts: str,
+    max_points: int = 600,
+) -> list[dict]:
+    """Intraday points inside an exact timestamp window (e.g. one workout session),
+    evenly downsampled like query_intraday. Bounds are ISO UTC strings matching the
+    stored `...Z` format, so plain string comparison is correct."""
+    where = "WHERE data_type=? AND ts >= ? AND ts <= ?"
+    params: list[Any] = [data_type, start_ts, end_ts]
+    with _connect() as conn:
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM intraday_points {where}", params
+        ).fetchone()[0]
+        stride = max(1, -(-total // max_points))
+        sql = (
+            "SELECT ts, value FROM ("
+            "  SELECT ts, value,"
+            "         ROW_NUMBER() OVER (ORDER BY ts DESC) AS rn"
+            f"  FROM intraday_points {where}"
+            ") WHERE (rn - 1) % ? = 0 ORDER BY ts"
+        )
+        return [dict(r) for r in conn.execute(sql, [*params, stride]).fetchall()]
+
+
 # --- workout sessions ---------------------------------------------------------
 
 def upsert_workouts(sessions: list[dict[str, Any]]) -> int:
@@ -431,6 +468,17 @@ def upsert_workouts(sessions: list[dict[str, Any]]) -> int:
     return len(sessions)
 
 
+def get_workout(workout_id: str) -> dict | None:
+    """One session with its raw timestamps (for the intraday drill-down)."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id, day, start_ts, start_local, end_ts, activity, duration_min, "
+            "calories, distance_km, steps, avg_hr, azm FROM workout_sessions WHERE id=?",
+            (workout_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def query_workouts(days: int | None = 90, limit: int = 200) -> list[dict]:
     """Individual sessions, newest first."""
     sql = ("SELECT id, day, start_local, activity, duration_min, calories, distance_km, "
@@ -443,6 +491,38 @@ def query_workouts(days: int | None = 90, limit: int = 200) -> list[dict]:
     params.append(limit)
     with _connect() as conn:
         return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+# --- coach memory -------------------------------------------------------------
+
+def add_memory(content: str, category: str = "other") -> int:
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO coach_memory (created_at, updated_at, category, content) "
+            "VALUES (?, ?, ?, ?)",
+            (now, now, category, content),
+        )
+        return int(cur.lastrowid)
+
+
+def list_memories(include_inactive: bool = False) -> list[dict]:
+    sql = ("SELECT id, created_at, updated_at, category, content, active FROM coach_memory")
+    if not include_inactive:
+        sql += " WHERE active=1"
+    sql += " ORDER BY id"
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(sql).fetchall()]
+
+
+def forget_memory(memory_id: int) -> bool:
+    """Soft-deactivate. Returns False when no active memory had that id."""
+    with _connect() as conn:
+        cur = conn.execute(
+            "UPDATE coach_memory SET active=0, updated_at=? WHERE id=? AND active=1",
+            (datetime.now(timezone.utc).isoformat(), memory_id),
+        )
+        return cur.rowcount > 0
 
 
 # --- goals ------------------------------------------------------------------

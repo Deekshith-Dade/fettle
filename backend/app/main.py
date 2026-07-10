@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from . import (
     auth, benchmarks, briefing, chat, coach, config, goals, insights, readiness,
-    sleep_analysis, store, sync,
+    sleep_analysis, store, sync, workouts,
 )
 from .config import REGISTRY, REGISTRY_BY_NAME, settings
 
@@ -139,6 +139,35 @@ def briefing_refresh() -> dict:
         raise HTTPException(502, f"Briefing generation failed: {exc}")
 
 
+@app.get("/api/briefing/weekly")
+def briefing_weekly() -> dict:
+    """The stored weekly retrospective (regenerated Sundays post-sync, or on demand)."""
+    return {"briefing": briefing.latest("weekly")}
+
+
+@app.post("/api/briefing/weekly/refresh")
+def briefing_weekly_refresh() -> dict:
+    try:
+        return {"briefing": briefing.generate_weekly(force=True)}
+    except briefing.BriefingError as exc:
+        raise HTTPException(502, f"Weekly retrospective failed: {exc}")
+
+
+# --- coach memory (what the chat coach has been told and kept) -----------------
+
+@app.get("/api/coach/memory")
+def coach_memory_list() -> dict:
+    """Durable facts the coach saved from chat — full transparency into what it knows."""
+    return {"memories": store.list_memories()}
+
+
+@app.delete("/api/coach/memory/{memory_id}")
+def coach_memory_delete(memory_id: int) -> dict:
+    if not store.forget_memory(memory_id):
+        raise HTTPException(404, f"No active memory with id {memory_id}.")
+    return {"ok": True}
+
+
 @app.get("/api/coach")
 def coach_today(limit: int = Query(default=3, ge=1, le=5)) -> dict:
     """Ranked 'what to do today' recommendations synthesised from the current state."""
@@ -212,9 +241,19 @@ def daily_bulk() -> dict:
 
 
 @app.get("/api/workouts")
-def workouts(days: int = Query(default=90, ge=1, le=365)) -> dict:
+def workouts_list(days: int = Query(default=90, ge=1, le=365)) -> dict:
     """Individual exercise sessions, newest first (the exercise-* dailies aggregate these)."""
     return {"workouts": store.query_workouts(days=days)}
+
+
+@app.get("/api/workouts/detail")
+def workout_detail(id: str = Query(...)) -> dict:
+    """One session with its intraday heart-rate trace and time-in-zone. The id is the
+    API dataPoint name (contains slashes), hence a query param rather than a path part."""
+    data = workouts.detail(id)
+    if not data:
+        raise HTTPException(404, "No such workout session.")
+    return data
 
 
 def _require_type(name: str):

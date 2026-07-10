@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 import webbrowser
+from datetime import date
 
 from app import auth, store, sync
 from app.config import REGISTRY
@@ -54,8 +55,21 @@ def cmd_sync(names: list[str]) -> int:
         b = briefing.generate()
         if b:
             print(f"Briefing: {b['headline']}")
+        if date.today().weekday() == 6:  # Sunday: close out the week too
+            w = briefing.generate_weekly()
+            if w:
+                print(f"Weekly retro: {w['headline']}")
     except Exception as exc:  # noqa: BLE001
         print(f"  (briefing skipped: {exc})", file=sys.stderr)
+
+    # Reach out only when something needs attention: token dying, vitals drifting
+    # together, or a defended goal streak breaking. Deduped in app/notify.py.
+    try:
+        from app import notify
+        for n in notify.check_and_send():
+            print(f"Notified: {n['title']}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  (notify skipped: {exc})", file=sys.stderr)
 
     return 0 if report.ok else 1
 

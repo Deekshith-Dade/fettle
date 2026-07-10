@@ -17,7 +17,7 @@ import remarkGfm from "remark-gfm";
 import {
   chatApi, streamChat,
   type ChatAttachment, type ChatBlock, type ChatMessage, type ChatModel,
-  type ChatToolCall, type Conversation,
+  type ChatToolCall, type CoachMemory, type Conversation,
 } from "../lib/api";
 import { bustWidgetCache, ChatWidget } from "./chat-widgets";
 
@@ -125,10 +125,66 @@ function groupFor(iso: string): string {
   return "Earlier";
 }
 
+// ---------- memory panel ----------------------------------------------------------
+// Full transparency into what the coach has saved from chat: list it, forget any of it.
+
+function MemoryPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [mems, setMems] = useState<CoachMemory[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    setMems(null);
+    setErr(null);
+    chatApi.memories()
+      .then((r) => setMems(r.memories))
+      .catch(() => setErr("Couldn't load memory — is the backend up?"));
+  }, [open]);
+  if (!open) return null;
+  return (
+    <div className="mem-scrim" onClick={onClose}>
+      <div className="mem-panel" role="dialog" aria-label="Coach memory"
+        onClick={(e) => e.stopPropagation()}>
+        <div className="mem-head">
+          <h3>What your coach remembers</h3>
+          <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <p className="mem-note">
+          Durable facts you mention in chat — injuries, schedule, preferences, upcoming
+          events — get saved here and shape future coaching and the daily briefing.
+          Forget anything, anytime.
+        </p>
+        {err && <p className="mem-empty">{err}</p>}
+        {mems && !mems.length && !err && (
+          <p className="mem-empty">Nothing saved yet. Try telling the coach “my left knee
+          is sore this week” — it'll remember.</p>
+        )}
+        <ul className="mem-list">
+          {(mems ?? []).map((m) => (
+            <li className="mem-row" key={m.id}>
+              <span className="mem-cat">{m.category}</span>
+              <span className="mem-content">{m.content}</span>
+              <span className="mem-since">{m.created_at.slice(0, 10)}</span>
+              <button
+                className="mem-forget" title="Forget this"
+                onClick={async () => {
+                  await chatApi.forgetMemory(m.id);
+                  setMems((cur) => (cur ?? []).filter((x) => x.id !== m.id));
+                }}
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 // ---------- sidebar --------------------------------------------------------------
 
 function Sidebar({
-  convs, activeId, open, onClose, onNew, onSelect, onRename, onDelete,
+  convs, activeId, open, onClose, onNew, onSelect, onRename, onDelete, onMemory,
 }: {
   convs: Conversation[];
   activeId: number | null;
@@ -138,6 +194,7 @@ function Sidebar({
   onSelect: (id: number) => void;
   onRename: (id: number, title: string) => void;
   onDelete: (id: number) => void;
+  onMemory: () => void;
 }) {
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
@@ -229,6 +286,13 @@ function Sidebar({
           ))}
           {!convs.length && <p className="conv-empty">Your conversations will live here.</p>}
         </nav>
+        <button className="side-mem" onClick={onMemory}>
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+            strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M17 21v-8H7v8M7 3v5h8M5 3h11l5 5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+          </svg>
+          Memory
+        </button>
         <a className="side-foot" href="/">← Back to the dashboard</a>
       </aside>
     </>
@@ -249,6 +313,7 @@ export default function CoachChat() {
   const [live, setLive] = useState<{ tools: ChatToolCall[]; blocks: ChatBlock[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sideOpen, setSideOpen] = useState(false);
+  const [memOpen, setMemOpen] = useState(false);
 
   const liveRef = useRef({ tools: [] as ChatToolCall[], blocks: [] as ChatBlock[] });
   const abortRef = useRef<AbortController | null>(null);
@@ -430,7 +495,9 @@ export default function CoachChat() {
           if (id === activeId) newChat();
           refreshConvs();
         }}
+        onMemory={() => setMemOpen(true)}
       />
+      <MemoryPanel open={memOpen} onClose={() => setMemOpen(false)} />
 
       <main className="coach-main">
         <div className="coach-mobilebar">
