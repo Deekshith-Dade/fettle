@@ -1359,8 +1359,11 @@ export default function Dashboard() {
   const [open, setOpen] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [view, setView] = useState("overview");
-  const navRef = useRef<HTMLElement>(null);
+  const navRef = useRef<HTMLDivElement>(null);   // sticky wrap: pin detection
+  const railRef = useRef<HTMLElement>(null);     // scrolling chip rail inside it
   const [navStuck, setNavStuck] = useState(false);
+  // Which edges of the view rail have more chips hiding past them (phone widths).
+  const [navEdges, setNavEdges] = useState({ l: false, r: false });
   const [theme, setTheme] = useState<"system" | "light" | "dark">("system");
   const [dailyCache, setDailyCache] = useState<Record<string, Point[]>>({});
   const [intradayCache, setIntradayCache] = useState<Record<string, Point[]>>({});
@@ -1392,6 +1395,32 @@ export default function Dashboard() {
     } catch { /* cosmetic only */ }
   }
 
+  // The dashboard's full data pull — on mount, and again when the home-screen app
+  // resumes from the background (standalone mode keeps the page alive for days and
+  // has no reload gesture).
+  const lastLoadedAt = useRef(0);
+  async function loadData() {
+    const [dts, bulk, r, ins, rec, bm, sd] = await Promise.all([
+      api.dataTypes(),
+      api.dailyBulk(),
+      api.readiness().catch(() => null),
+      api.insights().then((x) => x.insights).catch(() => []),
+      api.coach().then((x) => x.recommendations).catch(() => []),
+      api.benchmarks().catch(() => null),
+      api.sleepDetail().catch(() => null),
+    ]);
+    setTypes(dts);
+    setDailyCache(bulk.series);
+    setReadiness(r);
+    setInsights(ins);
+    setCoachRecs(rec);
+    setBenchmarks(bm);
+    setSleepDetail(sd);
+    loadGoals();
+    refreshSyncMeta();
+    lastLoadedAt.current = Date.now();
+  }
+
   useEffect(() => {
     (async () => {
       try {
@@ -1411,28 +1440,28 @@ export default function Dashboard() {
             scopes: [],
           })
         );
-        const [dts, bulk, r, ins, rec, bm, sd] = await Promise.all([
-          api.dataTypes(),
-          api.dailyBulk(),
-          api.readiness().catch(() => null),
-          api.insights().then((x) => x.insights).catch(() => []),
-          api.coach().then((x) => x.recommendations).catch(() => []),
-          api.benchmarks().catch(() => null),
-          api.sleepDetail().catch(() => null),
-        ]);
-        setTypes(dts);
-        setDailyCache(bulk.series);
-        setReadiness(r);
-        setInsights(ins);
-        setCoachRecs(rec);
-        setBenchmarks(bm);
-        setSleepDetail(sd);
-        loadGoals();
-        refreshSyncMeta();
+        await loadData();
       } catch (e) {
         setError(String(e));
       }
     })();
+  }, []);
+
+  // Foregrounding after ≥5 minutes away refreshes the ledger (and the token pill —
+  // the weekly-handshake band should appear the morning it dies, not on next reload).
+  // Failures keep the stale data on screen: better than an error when off-tailnet.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastLoadedAt.current < 5 * 60 * 1000) return;
+      api.health()
+        .then((h) => { setAuthed(h.authenticated); setTokenDays(h.token_days_left); })
+        .catch(() => {});
+      loadData().catch(() => {});
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Deep-link the open metric via ?m= so a metric view is shareable/bookmarkable
@@ -1659,12 +1688,18 @@ export default function Dashboard() {
   useEffect(() => {
     const onScroll = () => {
       const el = navRef.current;
-      if (el) setNavStuck(el.getBoundingClientRect().top <= 0.5);
+      if (!el) return;
+      // The nav pins at top: env(safe-area-inset-top) — 0 on desktop, the status-bar
+      // height as a home-screen app. Read the live offset instead of assuming 0, or
+      // the frosted .stuck background never engages on the phone.
+      const pinTop = parseFloat(getComputedStyle(el).top) || 0;
+      setNavStuck(el.getBoundingClientRect().top <= pinTop + 0.5);
     };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
 
   // ⌘K / Ctrl-K toggles the command palette anywhere; "/" opens it too, unless you're
   // typing in a field (goal editor, etc.). Escape is handled inside the palette.
@@ -1689,6 +1724,40 @@ export default function Dashboard() {
   // decision needs setup.has_data, and flashing the wrong one first reads as a glitch.
   const loading = (authed === null || setup === null) && !error;
   const firstRun = setup !== null && !setup.has_data;
+
+  // Edge fades on the view rail: only signal "more this way" when it's true. Keyed on
+  // loading/firstRun because the nav only mounts once the dashboard renders — an
+  // on-mount-only effect would grab a null ref and never attach.
+  useEffect(() => {
+    const el = railRef.current;
+    if (!el) return;
+    const edges = () => {
+      const l = el.scrollLeft > 4;
+      const r = el.scrollLeft + el.clientWidth < el.scrollWidth - 4;
+      setNavEdges((p) => (p.l === l && p.r === r ? p : { l, r }));
+    };
+    edges();
+    // Chip widths shift after mount (webfont swap) and neither that nor rotation
+    // reliably fires an observer on the rail — a slow poll catches everything, and
+    // the compare-before-set above makes no-change ticks free.
+    const t = setInterval(edges, 1000);
+    el.addEventListener("scroll", edges, { passive: true });
+    window.addEventListener("resize", edges);
+    return () => {
+      clearInterval(t);
+      el.removeEventListener("scroll", edges);
+      window.removeEventListener("resize", edges);
+    };
+  }, [loading, firstRun]);
+
+  // Keep the active chip visible when the rail overflows (deep links, phone taps).
+  // navEdges is a dep on purpose: on a cold deep-link load the rail only overflows
+  // once the webfont swaps in — the poll flips navEdges then, which re-centers.
+  useEffect(() => {
+    railRef.current
+      ?.querySelector(".chip.active")
+      ?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+  }, [view, loading, firstRun, navEdges]);
 
   return (
     <div className="shell">
@@ -1737,6 +1806,10 @@ export default function Dashboard() {
               {tokenDays <= 0 ? "re-auth needed" : `re-auth in ${Math.floor(tokenDays)}d`}
             </span>
           )}
+          <a className="btn btn-coach" href="/coach" title="Ask your data anything" aria-label="Coach">
+            <span className="btn-coach-label">Coach</span>
+            <span className="coach-star" aria-hidden>✦</span>
+          </a>
           <button className="btn btn-lime" onClick={runSync} disabled={syncing || !authed}>
             {syncing && <span className="spinner" aria-hidden />}
             {syncing ? "Syncing" : "Sync"}
@@ -1780,16 +1853,20 @@ export default function Dashboard() {
           )}
 
           {/* ———— tab bar ———— */}
-          <nav ref={navRef} className={`secnav${navStuck ? " stuck" : ""}`} aria-label="Views">
-            {tabs.map((t) => (
-              <button key={t.id} className={`chip${view === t.id ? " active" : ""}`} onClick={() => go(t.id)}>
-                {t.label}
-              </button>
-            ))}
-            <a className="chip chip-coach" href="/coach" title="Ask your data anything">
-              Coach<span className="coach-star" aria-hidden>✦</span>
-            </a>
-          </nav>
+          <div
+            ref={navRef}
+            className={`secnav-wrap${navStuck ? " stuck" : ""}${navEdges.l ? " can-l" : ""}${navEdges.r ? " can-r" : ""}`}
+          >
+            <nav ref={railRef} className="secnav" aria-label="Views">
+              {tabs.map((t) => (
+                <button key={t.id} className={`chip${view === t.id ? " active" : ""}`} onClick={() => go(t.id)}>
+                  {t.label}
+                </button>
+              ))}
+            </nav>
+            <i className="secnav-fade fade-l" aria-hidden />
+            <i className="secnav-fade fade-r" aria-hidden />
+          </div>
 
           {/* ———— OVERVIEW · readiness hero ———— */}
           {view === "overview" && readiness && (

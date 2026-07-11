@@ -270,6 +270,13 @@ One caveat: the Google OAuth redirect URI is `localhost`, so **connecting/re-aut
 happens on the machine itself** — do the weekly handshake there; reading and the coach
 work from any device.
 
+**Make it feel like an app**: open the tailnet URL in Safari on the phone, then
+Share → *Add to Home Screen*. fettle installs as a standalone app — its own icon and
+app-switcher card, no browser chrome, no rubber-band scroll, content tucked around the
+notch. It refreshes its data automatically when foregrounded after time away (there's
+no reload gesture in standalone mode). iOS is happy to install over plain `http://` on
+a tailnet; no HTTPS or service worker required.
+
 ## Repo map
 
 ```

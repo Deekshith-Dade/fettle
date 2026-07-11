@@ -161,20 +161,34 @@ body::before {
 .toast button { background: none; border: none; color: inherit; cursor: pointer; font-size: 15px; line-height: 1; padding: 2px; opacity: 0.7; }
 .toast button:hover { opacity: 1; }
 
-/* ---------- section nav ---------- */
-.secnav {
+/* ---------- section nav ----------
+   Two jobs, two elements: the wrap sticks to the top and carries the frosted
+   .stuck backdrop; the rail inside scrolls its chips. Fade overlays on the wrap
+   signal hidden chips (page.tsx toggles .can-l/.can-r from the rail's scroll). */
+.secnav-wrap {
   position: sticky; top: 0; z-index: 30;
-  display: flex; gap: 2px; align-items: center; overflow-x: auto; scrollbar-width: none;
-  margin: 22px -30px 32px; padding: 0 30px;
+  margin: 22px -30px 32px;
   background: transparent; border-bottom: 1px solid transparent;
   transition: background 0.28s ease, border-color 0.28s ease, backdrop-filter 0.28s ease;
 }
-.secnav.stuck {
+.secnav-wrap.stuck {
   background: color-mix(in oklab, var(--ink) 86%, transparent);
   backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
   border-bottom-color: var(--line);
 }
+.secnav {
+  display: flex; gap: 2px; align-items: center;
+  overflow-x: auto; scrollbar-width: none; padding: 0 30px;
+}
 .secnav::-webkit-scrollbar { display: none; }
+.secnav-fade {
+  position: absolute; top: 0; bottom: 0; width: 34px; z-index: 1;
+  pointer-events: none; opacity: 0; transition: opacity 0.2s ease;
+}
+.secnav-fade.fade-l { left: 0; background: linear-gradient(90deg, var(--ink) 25%, transparent); }
+.secnav-fade.fade-r { right: 0; background: linear-gradient(270deg, var(--ink) 25%, transparent); }
+.secnav-wrap.can-l .fade-l { opacity: 1; }
+.secnav-wrap.can-r .fade-r { opacity: 1; }
 .chip {
   position: relative; background: none; border: none;
   color: var(--faint); font-size: 13px; letter-spacing: 0.01em; padding: 13px 15px 14px;
@@ -640,8 +654,13 @@ body::before {
   .shell { padding: 24px 18px 70px; }
   .topbar { flex-direction: column; align-items: stretch; row-gap: 14px; }
   .controls { flex-wrap: wrap; justify-content: flex-start; row-gap: 8px; }
+  /* Coach collapses to its ✦ mark — the row stays one airy line on a phone. */
+  .btn-coach { padding: 8px 13px; }
+  .btn-coach-label { display: none; }
+  .btn-coach .coach-star { font-size: 14px; line-height: 1; }
   .syncmeta { width: 100%; order: 3; }
-  .secnav { margin: 18px -18px 26px; padding: 0 18px; }
+  .secnav-wrap { margin: 18px -18px 26px; }
+  .secnav { padding: 0 18px; }
   .chip { padding: 12px 12px 13px; }
   .drawer { width: 100vw; border-left: none; padding: 24px 20px 40px; }
   .hero { padding: 26px 22px; }
@@ -1403,8 +1422,9 @@ body::before {
   background: rgba(0, 0, 0, 0.45); backdrop-filter: blur(2px);
 }
 
-/* Coach chip in the dashboard nav */
-.chip-coach { text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+/* Coach — a first-class destination, pinned in the topbar beside Sync. */
+.btn-coach { text-decoration: none; gap: 6px; }
+.btn-coach:hover { border-color: rgba(205, 242, 78, 0.5); }
 .coach-star { color: var(--lime); font-size: 10px; }
 
 @media (max-width: 860px) {
@@ -1582,4 +1602,71 @@ body::before {
   .step { gap: 16px; }
   .step-num { min-width: 34px; font-size: 24px; }
   .step-row { flex-direction: column; gap: 4px; }
+}
+
+/* ————————————————————————————————————————————————————————————————
+   App feel — installed-to-home-screen (standalone) behavior.
+   Kill the web-page tells (rubber-band overscroll, tap flash, double-tap
+   zoom) and respect the notch/home-indicator safe areas. Inert on desktop:
+   env() insets are 0 there. Kept last so it wins the cascade.
+   ———————————————————————————————————————————————————————————————— */
+html, body { overscroll-behavior-y: none; }
+html { -webkit-text-size-adjust: 100%; }
+body { min-height: 100dvh; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+button, .chip, .btn-coach, .pill {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* An ink band behind the iPhone status bar (black-translucent lets the page run
+   under it). Opaque, above every overlay, so scrolled content never ghosts through
+   the clock; stays ink in the light theme too — it reads as hardware chrome and
+   keeps the white status text legible. Zero-height anywhere without a notch. */
+html::before {
+  content: ""; position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+  height: env(safe-area-inset-top, 0px); background: #0a0b0d;
+}
+
+.shell { padding-top: max(34px, calc(14px + env(safe-area-inset-top, 0px))); }
+.secnav-wrap { top: env(safe-area-inset-top, 0px); }
+.coach-mobilebar { padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
+.coach-side { padding-top: env(safe-area-inset-top, 0px); }
+.composer { padding-bottom: max(14px, calc(10px + env(safe-area-inset-bottom, 0px))); }
+
+@media (max-width: 640px) {
+  .shell {
+    padding-top: max(24px, calc(10px + env(safe-area-inset-top, 0px)));
+    padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+  }
+  .drawer {
+    padding-top: calc(24px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+  }
+}
+@media (max-width: 860px) {
+  /* 16px is Safari's no-focus-zoom floor; nicer to type on glass anyway. */
+  .composer-input { font-size: 16px; }
+}
+
+/* Installed-app iOS bug, measured on-device: the layout viewport is sized as
+   screen − status bar (932 − 59 = 873 on a 15 Pro Max) but anchored at the very top
+   of the screen, leaving a 59px dead band at the bottom. dvh/svh/innerHeight/
+   -webkit-fill-available all report the short value; only 100lvh spans the real
+   screen — and those bottom pixels paint and hit-test fine. Scoped to standalone:
+   in-browser Safari, lvh would overshoot under the visible toolbars. */
+@media (display-mode: standalone) {
+  .coach { height: 100lvh; }
+  body { min-height: 100lvh; }
+  /* Fixed full-screen overlays (inset: 0 / top+bottom: 0) stop at the short layout
+     viewport too — force their height to the real screen. With top and height set,
+     the bottom anchor is over-constrained and correctly ignored. */
+  .veil, .drawer, .cmdk-scrim, .mem-scrim, .coach-scrim, .coach-side { height: 100lvh; }
+}
+
+/* Touch has no hover: keep each goal's edit/✕ visible, and pad the card head so the
+   status badge slides clear of them (they share the card's top-right corner). */
+@media (hover: none) {
+  .goal-actions { opacity: 1; }
+  .goal-body .goal-head { padding-right: 50px; }
 }

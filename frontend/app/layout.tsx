@@ -18,9 +18,22 @@ const hanken = Hanken_Grotesk({
 export const metadata: Metadata = {
   title: "fettle",
   description: "Your health, read closely.",
+  // Installed-to-home-screen mode (iOS): full-screen, no Safari chrome. The status
+  // bar overlays the page (black-translucent) — globals.css paints an ink band under
+  // it via env(safe-area-inset-top) so the clock stays legible in both themes.
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "fettle" },
+  // Health numerals everywhere; don't let iOS turn digit runs into phone links.
+  formatDetection: { telephone: false },
 };
 
 export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // Stops Safari's auto-zoom when focusing inputs (the coach composer). iOS still
+  // honors a deliberate pinch, so accessibility zoom survives this.
+  maximumScale: 1,
+  // Extend the page under the notch/home indicator; safe-area insets pad it back.
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: dark)", color: "#0a0b0d" },
     { media: "(prefers-color-scheme: light)", color: "#f3f1ea" },
