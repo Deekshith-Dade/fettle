@@ -143,6 +143,14 @@ export type SleepNight = {
 };
 export type SleepDetail = {
   as_of: string; need_hours: number;
+  need_basis: {
+    hours: number; source: "personal" | "population"; median: number | null;
+    nights: number; window: number; band: [number, number]; clamped: boolean;
+  };
+  tonight: {
+    hours: number; need: number; debt_payback: number; load_bump: number;
+    capped: boolean; tone: string; message: string;
+  };
   last_night: {
     day: string; duration: number | null; efficiency: number | null; score: number | null;
     stages: Record<string, number | null>; stage_pct: Record<string, number>;

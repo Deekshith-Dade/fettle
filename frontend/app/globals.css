@@ -719,6 +719,35 @@ body::before {
 .bm-foot { font-size: 11.5px; margin-top: 20px; max-width: 70ch; }
 
 /* ---- sleep ---- */
+/* Tonight's prescription: the number on the left, the arithmetic on the right —
+   fettle shows the receipt, not just the verdict. --tc is the tone color. */
+.tonight {
+  display: grid; grid-template-columns: 1.2fr 1fr; gap: 30px; align-items: center;
+  padding: 24px 28px; margin-bottom: 14px;
+  border: 1px solid color-mix(in oklab, var(--tc) 30%, var(--line));
+  border-radius: 20px;
+  background: linear-gradient(180deg, color-mix(in oklab, var(--tc) 5%, transparent), transparent), var(--ink-1);
+}
+.tonight-big {
+  font-family: var(--font-display); font-size: 52px; font-weight: 380;
+  letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums;
+  color: var(--tc);
+}
+.tonight-msg { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 12px 0 0; max-width: 46ch; }
+.tonight-receipt { display: flex; flex-direction: column; gap: 7px; }
+.tr-row {
+  display: flex; align-items: baseline; gap: 10px;
+  font-size: 12.5px; color: var(--muted); letter-spacing: 0.01em;
+}
+.tr-row i { flex: 1; border-bottom: 1px dotted var(--line-strong); transform: translateY(-3px); }
+.tr-row b { font-variant-numeric: tabular-nums; color: var(--text); font-weight: 600; white-space: nowrap; }
+.tr-total { padding-top: 7px; border-top: 1px solid var(--hairline); }
+.tr-total span { color: var(--text); }
+.tr-total b { color: var(--tc); }
+.tr-basis { color: var(--faint); font-size: 11px; line-height: 1.5; margin: 8px 0 0; font-style: italic; }
+.teaser-sleep-tonight { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+.teaser-sleep-tonight b { color: var(--lime); font-variant-numeric: tabular-nums; }
+
 .sleep-hero {
   display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: center;
   padding: 26px 28px; border: 1px solid var(--line); border-radius: 20px;
@@ -752,6 +781,7 @@ body::before {
 
 @media (max-width: 760px) {
   .sleep-hero { grid-template-columns: 1fr; gap: 22px; }
+  .tonight { grid-template-columns: 1fr; gap: 18px; }
 }
 
 /* overview teasers */

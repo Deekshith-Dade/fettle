@@ -27,7 +27,7 @@ import math
 from datetime import date, timedelta
 from typing import Any, Callable
 
-from . import store
+from . import sleep_analysis, store
 
 # Direction that counts as an improvement, per metric. "down" means lower-is-better.
 GOOD_DIR: dict[str, str] = {
@@ -334,19 +334,24 @@ def _load_balance(cache: dict[str, list[dict]]) -> list[dict[str, Any]]:
 
 
 def _sleep_debt(cache: dict[str, list[dict]]) -> list[dict[str, Any]]:
-    """Cumulative shortfall vs an 8h target over the last 7 nights."""
+    """Cumulative shortfall vs your personalized need over the last 7 nights.
+
+    The need comes from sleep_analysis.personal_need so this card, the sleep
+    deep-dive, and the coach all quote the same number."""
     s = _series("sleep-duration", cache)
     if len(s) < 5:
         return []
-    last7 = [v for _, v in s[-7:]]
-    debt = sum(max(0.0, 8.0 - v) for v in last7)
-    surplus = sum(max(0.0, v - 8.0) for v in last7)
+    vals = [v for _, v in s]
+    need = sleep_analysis.personal_need(vals)["hours"]
+    last7 = [v for v in vals if v >= sleep_analysis.MIN_NIGHT_HOURS][-7:]
+    debt = sum(max(0.0, need - v) for v in last7)
+    surplus = sum(max(0.0, v - need) for v in last7)
     net = debt - surplus
     if net >= 3:
         return [{
             "id": "sleep-debt", "kind": "sleep_debt", "sentiment": "watch",
             "metric": "sleep-duration", "title": f"{net:.1f}h sleep debt",
-            "detail": f"You're {net:.1f}h short of 8h/night across the last "
+            "detail": f"You're {net:.1f}h short of your {need:.1f}h/night need across the last "
                       f"{len(last7)} nights. An early night would help.",
             "priority": 44 + net * 2,
         }]
@@ -354,7 +359,8 @@ def _sleep_debt(cache: dict[str, list[dict]]) -> list[dict[str, Any]]:
         return [{
             "id": "sleep-debt", "kind": "sleep_debt", "sentiment": "good",
             "metric": "sleep-duration", "title": "Well rested",
-            "detail": f"You've banked {surplus:.1f}h above 8h/night this week — no sleep debt.",
+            "detail": f"You've banked {surplus:.1f}h above your {need:.1f}h/night need this week — "
+                      "no sleep debt.",
             "priority": 38,
         }]
     return []

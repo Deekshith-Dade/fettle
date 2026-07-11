@@ -187,7 +187,10 @@ def get_benchmarks() -> dict:
 @mcp.tool()
 def get_sleep() -> dict:
     """Deep-dive on sleep: last night's stage breakdown, stage mix vs evidence-based targets,
-    rolling sleep debt vs need (Van Dongen), schedule regularity, and the recent trend."""
+    rolling sleep debt vs need (Van Dongen), schedule regularity, and the recent trend.
+    `need_hours`/`need_basis` = personalized sleep need (median of their own recent nights,
+    clamped to the 7-9h evidence band). `tonight` = tonight's prescribed sleep (need + capped
+    debt paydown + hard-training bump) — use it when they ask how much to sleep tonight."""
     return sleep_analysis.detail() or {"error": "Not enough sleep data yet."}
 
 

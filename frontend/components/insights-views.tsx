@@ -43,6 +43,12 @@ function fmt(n: number | null | undefined, dp = 1): string {
   if (Math.abs(n) >= 100 || Number.isInteger(n)) return String(Math.round(n));
   return n.toLocaleString(undefined, { maximumFractionDigits: dp });
 }
+function hm(hours: number): string {
+  const m = Math.round((hours * 60) / 5) * 5; // 5-minute grain — this is a target, not a lab value
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return mm ? `${h}h ${mm.toString().padStart(2, "0")}m` : `${h}h`;
+}
 function shortDay(iso: string): string {
   return new Date(iso + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
@@ -187,6 +193,39 @@ export function SleepView({ data }: { data: SleepDetail | null }) {
       </div>
       <hr className="sec-rule" />
 
+      {/* tonight's prescription — the one actionable number, receipts included */}
+      <div className="tonight" style={{ "--tc": toneColor(data.tonight.tone) } as CSSProperties}>
+        <div className="tonight-main">
+          <p className="eyebrow" style={{ marginBottom: 6 }}>Tonight · aim for</p>
+          <div className="tonight-big">{hm(data.tonight.hours)}</div>
+          <p className="tonight-msg">{data.tonight.message}</p>
+        </div>
+        <div className="tonight-receipt">
+          <div className="tr-row">
+            <span>your need</span><i /><b>{hm(data.tonight.need)}</b>
+          </div>
+          {data.tonight.debt_payback > 0 && (
+            <div className="tr-row">
+              <span>+ debt paydown</span><i /><b>{hm(data.tonight.debt_payback)}</b>
+            </div>
+          )}
+          {data.tonight.load_bump > 0 && (
+            <div className="tr-row">
+              <span>+ hard-day bump</span><i /><b>{hm(data.tonight.load_bump)}</b>
+            </div>
+          )}
+          <div className="tr-row tr-total">
+            <span>tonight</span><i /><b>{hm(data.tonight.hours)}</b>
+          </div>
+          <p className="tr-basis">
+            {data.need_basis.source === "personal"
+              ? `need = median of your last ${data.need_basis.nights} nights` +
+                (data.need_basis.clamped ? ", held to the 7–9h evidence band" : "")
+              : "need = 8h population anchor until 14 nights are recorded"}
+          </p>
+        </div>
+      </div>
+
       {/* last night hero */}
       <div className="sleep-hero">
         <div className="sleep-hero-main">
@@ -294,7 +333,7 @@ export function SleepView({ data }: { data: SleepDetail | null }) {
             labelStyle={{ color: "var(--muted)" }} labelFormatter={(d) => longDay(String(d))}
             formatter={(v) => [`${fmt(Number(v))} h`, "Sleep"]} />
           <ReferenceLine y={data.need_hours} stroke="rgba(130,130,130,0.4)" strokeDasharray="5 5"
-            label={{ value: `need ${data.need_hours}h`, position: "insideTopRight", fill: "#8b929c", fontSize: 10 }} />
+            label={{ value: `need ${data.need_hours.toFixed(1)}h`, position: "insideTopRight", fill: "#8b929c", fontSize: 10 }} />
           <Area type="monotone" dataKey="y" stroke="#2ba7be" fill="url(#sleepg)"
             strokeWidth={2} connectNulls dot={false} isAnimationActive={false} />
         </AreaChart>
@@ -335,6 +374,10 @@ export function SleepTeaser({ data, onOpen }: { data: SleepDetail | null; onOpen
             })}
           </div>
           <p className="teaser-sleep-note" style={{ color: toneColor(data.debt.tone) }}>{data.debt.message}</p>
+          <p className="teaser-sleep-tonight">
+            Tonight: aim for <b>{hm(data.tonight.hours)}</b>
+            {data.tonight.debt_payback > 0 ? " — includes debt paydown" : ""}
+          </p>
         </div>
       </div>
     </section>
