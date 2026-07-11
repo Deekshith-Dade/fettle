@@ -246,7 +246,7 @@ def detail() -> dict | None:
     # night; the rest clears over the following nights.
     payback = round(min(TONIGHT_DEBT_SHARE * max(net, 0.0), TONIGHT_DEBT_CAP), 2)
     load_bump = 0.0
-    load = _series(cache, "cardio-load", positive=True) or _series(cache, "heart-minutes", positive=True)
+    load = _series(cache, "cardio-load", positive=True) or _series(cache, "active-zone-minutes", positive=True)
     if load and load[-1][0] == date.today().isoformat():
         today_load = load[-1][1]
         base_vals = [v for _, v in load[-29:-1]]

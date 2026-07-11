@@ -249,6 +249,15 @@ def group_for(name: str) -> str:
     return _GROUP_BY_NAME.get(name, "Other")
 
 
+def accumulates_today(dt: DataType) -> bool:
+    """Whether the metric's value for *today* is still accumulating (partial until the
+    day ends). INTERVAL metrics sum through the day — steps at 9 AM are not the day's
+    steps — and cardio-load builds session by session. SAMPLE metrics (RHR, HRV, weight)
+    and completed sleep sessions are real values the moment they exist. Analytics that
+    compare days must exclude today's row for these, or a half-day reads as a record low."""
+    return dt.time_kind is TimeKind.INTERVAL or dt.api_name == "cardio-load"
+
+
 def scopes_for(data_types: list[DataType]) -> list[str]:
     """The minimal set of OAuth readonly scopes covering the given data types."""
     return sorted({dt.scope.readonly for dt in data_types})

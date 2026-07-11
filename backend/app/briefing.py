@@ -19,7 +19,7 @@ import subprocess
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from . import auth, benchmarks, goals, insights, readiness, sleep_analysis, store
+from . import auth, benchmarks, config, goals, insights, readiness, sleep_analysis, store
 from .chat import REPO_ROOT, _opencode_bin, _opencode_env, _plain, resolve_model
 from .config import REGISTRY, REGISTRY_BY_NAME
 
@@ -60,7 +60,14 @@ def _slim_sleep(detail: dict | None) -> dict | None:
     if not detail:
         return None
     slim = dict(detail)
-    slim.pop("nights", None)  # per-night array is bulky and already summarized
+    # A compact recent-nights list so per-night claims ("two strong nights in a row")
+    # are checkable against actual values; the full 28-night array with stage detail
+    # stays out (bulky, already summarized).
+    slim["recent_nights"] = [
+        {"day": n["day"], "duration": n["duration"], "score": n["score"]}
+        for n in detail.get("nights", [])[-7:]
+    ]
+    slim.pop("nights", None)
     return slim
 
 
@@ -81,6 +88,8 @@ def _slim_benchmarks(evaluated: dict) -> list[dict]:
 
 
 def _summary_30d(bulk: dict[str, list[dict]], days: int = 30) -> list[dict]:
+    """30-day stats over COMPLETE days only — the caller passes a cache already trimmed
+    of today's accumulating partials, so `latest`/`min` never reflect a half-day."""
     cutoff = (date.today() - timedelta(days=days)).isoformat()
     out = []
     for dt in REGISTRY:
@@ -94,6 +103,26 @@ def _summary_30d(bulk: dict[str, list[dict]], days: int = 30) -> list[dict]:
             "min": round(min(vals), 2), "max": round(max(vals), 2), "days": len(vals),
         })
     return out
+
+
+def _today_so_far(bulk: dict[str, list[dict]]) -> dict:
+    """Today's running values for the accumulating metrics, explicitly labeled partial —
+    the analyst may say 'quiet morning so far', never 'lowest day in the window'."""
+    today = date.today().isoformat()
+    metrics = []
+    for dt in REGISTRY:
+        if not config.accumulates_today(dt):
+            continue
+        rows = bulk.get(dt.api_name) or []
+        if rows and rows[-1]["day"] == today and rows[-1]["value"] is not None:
+            metrics.append({"metric": dt.api_name, "label": dt.label,
+                            "unit": dt.unit, "so_far_today": round(rows[-1]["value"], 2)})
+    return {
+        "note": ("PARTIAL values — these metrics accumulate through the day and today "
+                 "is not over. Not comparable to full days; excluded from summary_30d "
+                 "and signals."),
+        "metrics": metrics,
+    }
 
 
 def _system_status() -> dict:
@@ -155,7 +184,9 @@ def build_evidence() -> dict[str, Any]:
         "sleep": _slim_sleep(sleep_analysis.detail()),
         "goals": _slim_goals(goals.evaluate_all()),
         "benchmarks": _slim_benchmarks(benchmarks.evaluate_all()),
-        "summary_30d": _summary_30d(bulk),
+        # Complete days only — today's accumulating partials live in today_so_far.
+        "summary_30d": _summary_30d(insights.complete_days(bulk)),
+        "today_so_far": _today_so_far(bulk),
     }
 
 

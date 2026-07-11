@@ -27,7 +27,7 @@ import math
 from datetime import date, timedelta
 from typing import Any, Callable
 
-from . import sleep_analysis, store
+from . import config, sleep_analysis, store
 
 # Direction that counts as an improvement, per metric. "down" means lower-is-better.
 GOOD_DIR: dict[str, str] = {
@@ -525,9 +525,25 @@ DETECTORS = [_trends, _anomalies, _records, _streaks, _load_balance, _sleep_debt
              _consistency, _rhr_elevation, _vitals_watch, _correlations]
 
 
+def complete_days(cache: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    """The daily cache with today's still-accumulating rows dropped (see
+    config.accumulates_today). Detectors compare days against each other, so a
+    half-elapsed today must not compete — 275 steps at 9 AM once read as a 30-day
+    record low. Point-in-time metrics keep today: those values are already real."""
+    today = date.today().isoformat()
+    out: dict[str, list[dict]] = {}
+    for name, rows in cache.items():
+        dt = config.REGISTRY_BY_NAME.get(name)
+        if dt and config.accumulates_today(dt) and rows and rows[-1]["day"] == today:
+            out[name] = rows[:-1]
+        else:
+            out[name] = rows
+    return out
+
+
 def compute(limit: int = 8) -> list[dict[str, Any]]:
     """Run every detector over the stored series and return the top insights by priority."""
-    cache = store.query_daily_bulk()
+    cache = complete_days(store.query_daily_bulk())
     found: list[dict[str, Any]] = []
     for detect in DETECTORS:
         try:
