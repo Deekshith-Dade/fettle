@@ -1195,6 +1195,11 @@ body::before {
   font-size: 11px; padding: 0 0 0 2px; line-height: 1;
 }
 .att-chip button:hover { color: var(--rose); }
+.att-chip .att-thumb {
+  width: 24px; height: 24px; border-radius: 999px; object-fit: cover;
+  margin: -4px 0 -4px -7px;
+  border: 1px solid var(--line-strong);
+}
 .composer-box {
   border: 1px solid var(--line-strong); border-radius: 20px;
   background: var(--panel-solid);

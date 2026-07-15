@@ -32,6 +32,22 @@ const SUGGESTIONS: { glyph: string; q: string }[] = [
   { glyph: "✦", q: "What's the single most useful thing I can do today?" },
 ];
 
+// Staged attachments carry a client-side object URL so image chips can show a
+// thumbnail — pasted screenshots are otherwise indistinguishable from each other.
+type Staged = ChatAttachment & { preview?: string };
+
+// Clipboard images arrive as literal "image.png" (or nameless) — retitle them with a
+// timestamp so pasting several screenshots yields tell-apart chips. Real filenames
+// (Finder-copied files) pass through untouched.
+function namedForPaste(f: File): File {
+  if (f.name && !/^image\.\w+$/i.test(f.name)) return f;
+  const ext = (f.type.split("/")[1] || "png").replace("jpeg", "jpg");
+  const t = new Date();
+  const two = (n: number) => String(n).padStart(2, "0");
+  const stamp = `${two(t.getHours())}.${two(t.getMinutes())}.${two(t.getSeconds())}`;
+  return new File([f], `pasted-${stamp}.${ext}`, { type: f.type });
+}
+
 // ---------- small pieces --------------------------------------------------------
 
 function Md({ text }: { text: string }) {
@@ -308,7 +324,7 @@ export default function CoachChat() {
   const [models, setModels] = useState<ChatModel[]>([]);
   const [model, setModel] = useState<string>("");
   const [input, setInput] = useState("");
-  const [staged, setStaged] = useState<ChatAttachment[]>([]);
+  const [staged, setStaged] = useState<Staged[]>([]);
   const [sending, setSending] = useState(false);
   const [live, setLive] = useState<{ tools: ChatToolCall[]; blocks: ChatBlock[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -326,6 +342,35 @@ export default function CoachChat() {
   const refreshConvs = useCallback(() => {
     chatApi.conversations().then(setConvs).catch(() => {});
   }, []);
+
+  // One staging path for every way a file can arrive (picker, paste). Uploads run
+  // serially to keep chip order = arrival order; images get a local thumbnail URL.
+  const stageFiles = useCallback(async (files: File[]) => {
+    for (const f of files) {
+      try {
+        const att = await chatApi.upload(f);
+        const preview = f.type.startsWith("image/") ? URL.createObjectURL(f) : undefined;
+        setStaged((s) => [...s, { ...att, preview }]);
+      } catch {
+        setError(`Couldn't upload ${f.name}.`);
+      }
+    }
+  }, []);
+
+  // Paste-to-attach, anywhere on the page: a screenshot (⌘⇧⌃4 → ⌘V) or a Finder-copied
+  // file lands as a staged chip. Document-level so the composer needn't be focused.
+  // File pastes are consumed here (some browsers would otherwise drop a stray filename
+  // into the textarea); plain-text pastes pass through untouched.
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      const files = Array.from(e.clipboardData?.files ?? []);
+      if (!files.length) return;
+      e.preventDefault();
+      void stageFiles(files.map(namedForPaste));
+    }
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [stageFiles]);
 
   useEffect(() => {
     refreshConvs();
@@ -389,7 +434,8 @@ export default function CoachChat() {
     const message = (text ?? input).trim();
     if (!message || sending) return;
     lastSentRef.current = message;
-    const attachments = staged;
+    const attachments = staged.map(({ id, name }) => ({ id, name })); // previews stay local
+    staged.forEach((a) => a.preview && URL.revokeObjectURL(a.preview));
     setInput("");
     setStaged([]);
     if (inputRef.current) inputRef.current.style.height = "auto";
@@ -461,17 +507,10 @@ export default function CoachChat() {
     refreshConvs();
   }
 
-  async function onPickFiles(e: ChangeEvent<HTMLInputElement>) {
+  function onPickFiles(e: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    for (const f of files) {
-      try {
-        const att = await chatApi.upload(f);
-        setStaged((s) => [...s, att]);
-      } catch {
-        setError(`Couldn't upload ${f.name}.`);
-      }
-    }
+    void stageFiles(files);
   }
 
   function onKeyDown(e: ReactKeyboardEvent<HTMLTextAreaElement>) {
@@ -573,9 +612,17 @@ export default function CoachChat() {
             <div className="staged-row">
               {staged.map((a) => (
                 <span className="att-chip" key={a.id}>
-                  ⌁ {a.name}
+                  {a.preview ? (
+                    <img className="att-thumb" src={a.preview} alt="" aria-hidden />
+                  ) : (
+                    <span aria-hidden>⌁</span>
+                  )}
+                  {a.name}
                   <button
-                    onClick={() => setStaged((s) => s.filter((x) => x.id !== a.id))}
+                    onClick={() => {
+                      if (a.preview) URL.revokeObjectURL(a.preview);
+                      setStaged((s) => s.filter((x) => x.id !== a.id));
+                    }}
                     aria-label={`Remove ${a.name}`}
                   >
                     ✕
