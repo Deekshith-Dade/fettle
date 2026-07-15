@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Fettle frontend (production): `next start` on :3400. Paired with com.fettle.backend.
+  Exec's the next binary directly (not via /bin/bash) — a bash wrapper reading a script
+  under ~/Documents is blocked by macOS TCC ("Operation not permitted"), but node/next
+  already has Documents access, same as the tally agent.
+  `next start` serves the optimized build but never creates one, so run `npm run build`
+  first (ops/bootstrap builds; or rebuild to redeploy — see below).
+  Install:  cp ops/com.fettle.frontend.plist ~/Library/LaunchAgents/
+            launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.fettle.frontend.plist
+  Remove:   launchctl bootout gui/$(id -u)/com.fettle.frontend
+  Redeploy: ( cd frontend && npm run build ) && launchctl kickstart -k gui/$(id -u)/com.fettle.frontend
+  Logs:     ~/Library/Logs/fettle-frontend.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.fettle.frontend</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/node</string>
+        <string>node_modules/next/dist/bin/next</string>
+        <string>start</string>
+        <string>-p</string>
+        <string>3400</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/deekshith/Documents/Projects/agents/claude-agents/fettle/frontend</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/deekshith/Library/Logs/fettle-frontend.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/deekshith/Library/Logs/fettle-frontend.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>NODE_ENV</key>
+        <string>production</string>
+    </dict>
+</dict>
+</plist>

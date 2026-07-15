@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Fettle backend API (production): uvicorn on :8400 via serve.py, no --reload. Paired
+  with com.fettle.frontend. Together they replace `ops/dev.sh` for always-on serving.
+  serve.py binds a DUAL-STACK socket so the API answers over IPv4 (127.0.0.1 + tailnet
+  100.x, i.e. the phone) AND IPv6 (Safari's ::1). Plain `uvicorn --host ::` binds
+  IPv6-only on macOS → phone gets "TypeError: Load failed". Do not revert to --host ::.
+  Install:  cp ops/com.fettle.backend.plist ~/Library/LaunchAgents/
+            launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.fettle.backend.plist
+  Remove:   launchctl bootout gui/$(id -u)/com.fettle.backend
+  Restart:  launchctl kickstart -k gui/$(id -u)/com.fettle.backend
+  Logs:     ~/Library/Logs/fettle-backend.log
+  NOTE: stop this (and com.fettle.frontend) before running ops/dev.sh — they share
+        ports 8400/3400.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.fettle.backend</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/deekshith/Documents/Projects/agents/claude-agents/fettle/backend/.venv/bin/python</string>
+        <string>serve.py</string>
+        <string>8400</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/deekshith/Documents/Projects/agents/claude-agents/fettle/backend</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/deekshith/Library/Logs/fettle-backend.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/deekshith/Library/Logs/fettle-backend.log</string>
+</dict>
+</plist>
