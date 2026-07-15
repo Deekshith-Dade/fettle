@@ -257,6 +257,34 @@ Logs land in `~/Library/Logs/fettle-sync.log`; exit code 2 in the log means the
 7-day token died — reconnect from the dashboard. Remove the job any time with
 `launchctl bootout gui/$(id -u)/com.fettle.sync`.
 
+### Nightly backup to iCloud Drive (recommended)
+
+`health.db` is the only copy of your coach memories, chat history, goals, and
+briefing archive — none of that can be re-pulled from Google.
+
+```bash
+ops/install-backup.sh   # nightly at 02:30 (runs on next wake if the lid was shut)
+ops/backup.sh           # or take one snapshot right now
+```
+
+Each run VACUUMs a consistent snapshot, integrity-checks it, gzips it to
+`iCloud Drive/fettle-backups/health-YYYY-MM-DD.db.gz` (~8 MB), keeps the newest
+14, and copies `token.json`/`credentials.json` alongside. Restore = stop the
+backend, `gunzip -c <snapshot> > backend/health.db`, restart.
+
+**One-time step**: the first *scheduled* run makes macOS ask whether Python may
+touch iCloud Drive. Trigger it while you're at the screen and click Allow:
+
+```bash
+launchctl kickstart gui/$(id -u)/com.fettle.backup
+tail ~/Library/Logs/fettle-backup.log   # expect "✓ backed up …"
+```
+
+If the log shows `starting backup…` with no `✓`, the permission prompt was
+missed — grant it in System Settings → Privacy & Security → Full Disk Access
+(add the Python from `backend/.venv/bin/python`) and kickstart again. A blocked
+run kills itself after 10 minutes, so it can never wedge the schedule.
+
 ### Access it from your phone (optional)
 
 Put the machine on a [Tailscale](https://tailscale.com) tailnet (`brew install --cask
@@ -298,8 +326,10 @@ backend/
     notify.py           Post-sync macOS alerts (token / vitals / broken streaks)
     chat.py             SSE bridge: /api/chat ↔ opencode CLI (tools → widgets)
     chat_store.py       Conversation + message persistence
+    backup.py           Consistent snapshot of health.db (+tokens) to iCloud Drive
   mcp_server.py         The 25 MCP tools the coach model calls
-  cli.py                auth / sync / status commands
+  cli.py                auth / sync / status / backup commands
+  tests/                Regression net over the stats engine (pytest)
 frontend/
   app/page.tsx          The dashboard (all views)
   app/coach/page.tsx    The coach chat page
@@ -310,7 +340,15 @@ ops/
   bootstrap.sh          One command from fresh clone to runnable app
   dev.sh                Start both servers (backend :8400, dashboard :3400)
   install-sync.sh       Generate + load the 6-hourly launchd sync for this checkout
+  install-backup.sh     Generate + load the nightly iCloud backup job
+  backup.sh             Take one backup snapshot now
 ```
+
+Run the tests with `backend/.venv/bin/python -m pytest backend/tests -q`. They pin
+the data-correctness rules that matter most: partial-today quarantine, the
+personalized sleep-need clamp and artifact-night filter, the Tonight prescription
+(debt payback cap, hard-training bump, 9.5 h ceiling), readiness day-selection and
+component math, detector wording, and the backup round-trip.
 
 ## Gotchas
 

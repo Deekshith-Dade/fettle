@@ -4,6 +4,7 @@
     python cli.py sync              # sync all registered data types
     python cli.py sync steps sleep  # sync only specific types
     python cli.py status            # show per-type watermarks
+    python cli.py backup            # snapshot health.db (+tokens) to iCloud Drive
 """
 from __future__ import annotations
 
@@ -74,6 +75,29 @@ def cmd_sync(names: list[str]) -> int:
     return 0 if report.ok else 1
 
 
+def cmd_backup() -> int:
+    # Without an iCloud-Drive TCC grant, launchd runs hang inside sqlite's open()
+    # (which retries EINTR forever), and a hung job would block every later run.
+    # A hard SIGALRM (default action: die) is the only guard that works there —
+    # "starting" with no "✓" in the log is the tell. Fix: kickstart the job while
+    # at the screen and click Allow on the macOS prompt.
+    import signal
+    signal.signal(signal.SIGALRM, signal.SIG_DFL)
+    signal.alarm(600)
+    print("starting backup…", flush=True)
+    from app import backup
+    try:
+        out = backup.run()
+    except Exception as exc:  # noqa: BLE001 — the launchd log needs the reason
+        print(f"✗ backup failed: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        signal.alarm(0)
+    size_mb = out.stat().st_size / 1e6
+    print(f"✓ backed up {size_mb:.1f} MB → {out}")
+    return 0
+
+
 def cmd_status() -> int:
     store.init_db()
     rows = store.sync_status()
@@ -99,6 +123,8 @@ def main(argv: list[str]) -> int:
         return cmd_sync(rest)
     if cmd == "status":
         return cmd_status()
+    if cmd == "backup":
+        return cmd_backup()
     print(f"Unknown command '{cmd}'.\n{__doc__}")
     return 1
 
