@@ -65,7 +65,7 @@ def _components_for(
                       "value": round(r), "unit": "bpm", "delta": round(r - b, 1), "good": r <= b})
 
     du, ef = dur.get(d), eff.get(d)
-    if du is not None:
+    if du:  # a 0h duration is always a sync artifact, never a real night — treat as missing
         dscore = _clamp(100 - abs(du - 8) * 18, 0, 100)
         escore = _clamp(ef, 0, 100) if ef is not None else dscore
         comps.append({"key": "sleep", "label": "Sleep", "score": 0.6 * dscore + 0.4 * escore,

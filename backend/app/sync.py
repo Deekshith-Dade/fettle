@@ -108,7 +108,16 @@ def _duration_s(a: str | None, b: str | None) -> float:
 
 def _sync_sleep(client: HealthClient, today: date) -> TypeResult:
     """Derive daily sleep metrics (duration, per-stage time, efficiency) from `sleep`
-    session points. Each point is a sleep session with a `stages` breakdown."""
+    session points. Each point is a sleep session with a `stages` breakdown.
+
+    Sessions come in two shapes. STAGES nights carry granular LIGHT/DEEP/REM/AWAKE
+    spans. CLASSIC nights are Fitbit giving up on staging (metadata.stagesStatus
+    REJECTED_COVERAGE — e.g. a device-sync gap broke HR coverage) and rolling the whole
+    night into one ASLEEP span, with RESTLESS/AWAKE breaks. A classic night still
+    yields duration/awake/efficiency/score, but NO stage rows: absent means "unknown",
+    while a zero row would poison the stage averages and score readiness's sleep at 0
+    (the 2026-07-15 incident). Days with no recorded sleep content at all — e.g. a
+    session envelope Fitbit hasn't processed yet — get no rows for the same reason."""
     result = TypeResult(data_type="sleep")
     try:
         agg: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
@@ -121,21 +130,28 @@ def _sync_sleep(client: HealthClient, today: date) -> TypeResult:
             per: dict[str, float] = defaultdict(float)
             for st in s.get("stages") or []:
                 per[st.get("type", "?")] += _duration_s(st.get("startTime"), st.get("endTime"))
-            asleep = per["LIGHT"] + per["DEEP"] + per["REM"]
-            in_bed = _duration_s(iv.get("startTime"), iv.get("endTime")) or (asleep + per["AWAKE"])
+            staged = per["LIGHT"] + per["DEEP"] + per["REM"]
+            asleep = staged + per["ASLEEP"]         # ASLEEP: a classic night's single span
+            awake = per["AWAKE"] + per["RESTLESS"]  # RESTLESS appears on classic logs only
+            in_bed = _duration_s(iv.get("startTime"), iv.get("endTime")) or (asleep + awake)
             a = agg[day]
             a["sleep-duration"] += asleep
             a["sleep-rem"] += per["REM"]
             a["sleep-deep"] += per["DEEP"]
             a["sleep-light"] += per["LIGHT"]
-            a["sleep-awake"] += per["AWAKE"]
+            a["sleep-awake"] += awake
+            a["_staged"] += staged
             a["_asleep"] += asleep
             a["_in_bed"] += in_bed
         H = 3600.0
         rows = 0
-        for metric in ("sleep-duration", "sleep-rem", "sleep-deep", "sleep-light", "sleep-awake"):
-            rows += store.upsert_daily_values(metric, "h", {d: agg[d][metric] / H for d in agg})
-        eff = {d: agg[d]["_asleep"] / agg[d]["_in_bed"] * 100 for d in agg if agg[d]["_in_bed"] > 0}
+        slept = [d for d in agg if agg[d]["_asleep"] > 0]
+        staged_days = [d for d in slept if agg[d]["_staged"] > 0]
+        for metric in ("sleep-duration", "sleep-awake"):
+            rows += store.upsert_daily_values(metric, "h", {d: agg[d][metric] / H for d in slept})
+        for metric in ("sleep-rem", "sleep-deep", "sleep-light"):
+            rows += store.upsert_daily_values(metric, "h", {d: agg[d][metric] / H for d in staged_days})
+        eff = {d: agg[d]["_asleep"] / agg[d]["_in_bed"] * 100 for d in slept if agg[d]["_in_bed"] > 0}
         rows += store.upsert_daily_values("sleep-efficiency", "%", eff)
         rows += store.upsert_daily_values("sleep-score", "", _sleep_scores(agg, eff))
         result.daily_rows = rows
@@ -149,7 +165,9 @@ def _sleep_scores(agg: dict[str, dict[str, float]], eff: dict[str, float]) -> di
     """0-100 nightly sleep score, mirroring the app's Duration/Quality/Restoration split.
 
     Duration (50): full marks inside the 8-9h band, sliding off over ±4h outside it.
-    Quality (25): deep+REM share of sleep vs a 40% target.
+    Quality (25): deep+REM share of the *staged* sleep vs a 40% target. A classic
+    (unstaged) night has no quality signal — the score renormalizes over the other two
+    parts rather than punishing the unknown.
     Restoration (25): efficiency vs a 95% target (proxy for restlessness/sleeping HR).
     The formula is our own transparent heuristic, not Fitbit's proprietary model.
     """
@@ -161,9 +179,13 @@ def _sleep_scores(agg: dict[str, dict[str, float]], eff: dict[str, float]) -> di
             continue
         dur_h = asleep_s / 3600.0
         duration = clamp01(1 - max(0.0, 8 - dur_h) / 4 - max(0.0, dur_h - 9) / 4)
-        quality = clamp01(((a["sleep-deep"] + a["sleep-rem"]) / asleep_s) / 0.40)
         restoration = clamp01(eff.get(d, 90.0) / 95.0)
-        scores[d] = round(50 * duration + 25 * quality + 25 * restoration)
+        staged_s = a["_staged"]
+        if staged_s > 0:
+            quality = clamp01(((a["sleep-deep"] + a["sleep-rem"]) / staged_s) / 0.40)
+            scores[d] = round(50 * duration + 25 * quality + 25 * restoration)
+        else:
+            scores[d] = round((50 * duration + 25 * restoration) / 0.75)
     return scores
 
 
