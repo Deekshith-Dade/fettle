@@ -430,6 +430,60 @@ function SleepWidget({ nights }: { nights: number }) {
   );
 }
 
+/* ————— vital age card ————— */
+
+function vitalTone(delta: number, light: boolean): string {
+  if (delta < 0.4) return light ? "#5f8c0f" : "#cdf24e";   // younger / on par
+  if (delta <= 6) return light ? "#a9710c" : "#f4c257";    // mildly older
+  return light ? "#cf4d63" : "#f47a8f";                     // notably older
+}
+
+function VitalAgeWidget() {
+  const light = useThemeAttr() === "light";
+  const { data, err } = useCached("vital-age", () => api.vitalAge());
+  if (err) return <WErr msg="Not enough data for a Vital Age yet." />;
+  if (!data) return <Skel h={220} />;
+  const tone = vitalTone(data.delta_years, light);
+  const CAP = 12; // matches the backend DEV_CAP — the diverging bar's half-width
+  const gap =
+    data.verdict === "on par"
+      ? `on par with ${data.chronological_age.toFixed(0)}`
+      : `${Math.abs(data.delta_years).toFixed(1)}y ${data.verdict} than ${data.chronological_age.toFixed(0)}`;
+  return (
+    <div className="cw cw-vital">
+      <div className="cw-vital-top">
+        <span className="cw-vital-big" style={{ color: tone }}>{data.vital_age.toFixed(1)}</span>
+        <span className="cw-vital-gap">
+          {data.verdict !== "on par" && <span style={{ color: tone }}>{data.delta_years > 0 ? "▲ " : "▼ "}</span>}
+          {gap}
+        </span>
+      </div>
+      <div className="cw-vital-comps">
+        {data.components.map((c) => {
+          const ct = vitalTone(c.delta, light);
+          const frac = clamp(c.delta / CAP, -1, 1);
+          const younger = c.delta < 0;
+          return (
+            <div className="cw-vc" key={c.key} title={`${c.detail}\n\nBasis: ${c.basis}`}>
+              <span className="cw-vc-label">{c.label}</span>
+              <span className="cw-vc-bar" aria-hidden>
+                <i className="cw-vc-mid" />
+                <i className="cw-vc-seg" style={{
+                  left: `${younger ? 50 + frac * 50 : 50}%`,
+                  width: `${Math.abs(frac) * 50}%`, background: ct,
+                }} />
+              </span>
+              <span className="cw-vc-val" style={{ color: ct }}>
+                {c.equiv_age != null ? `~${c.equiv_age.toFixed(0)}y` : `${c.delta >= 0 ? "+" : "−"}${Math.abs(c.delta).toFixed(1)}y`}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ————— benchmark standing (reuses the dashboard's BenchmarkRow wholesale) ————— */
 
 function BenchmarkWidget({ metric }: { metric: string }) {
@@ -519,6 +573,8 @@ export function ChatWidget({ spec }: { spec: ChatWidgetSpec }) {
     }
     case "readiness":
       return <ReadinessWidget />;
+    case "vital_age":
+      return <VitalAgeWidget />;
     case "sleep":
       return <SleepWidget nights={num(p.nights, 5, 28, 14)} />;
     case "benchmark": {

@@ -57,6 +57,7 @@ TOOL_LABELS = {
     "fettle_get_metric": "Metric history",
     "fettle_get_intraday": "Intraday detail",
     "fettle_get_readiness": "Readiness engine",
+    "fettle_get_vital_age": "Vital Age",
     "fettle_get_insights": "Insights scan",
     "fettle_get_coach": "Coach engine",
     "fettle_get_benchmarks": "Peer benchmarks",

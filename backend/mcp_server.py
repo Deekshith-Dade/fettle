@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app import (  # noqa: E402
     benchmarks, coach, config, goals, insights, readiness, sleep_analysis, store,
+    vital_age,
 )
 from app.config import REGISTRY, REGISTRY_BY_NAME  # noqa: E402
 
@@ -156,6 +157,19 @@ def get_readiness() -> dict:
     (HRV, resting HR, sleep, training load, skin temp), each scored vs the personal
     baseline, plus a plain-English narrative. Prefer this over computing recovery yourself."""
     return readiness.today_breakdown() or {"error": "Not enough data to compute readiness yet."}
+
+
+@mcp.tool()
+def get_vital_age() -> dict:
+    """The person's Vital Age — how old their body *behaves* vs their real age, WHOOP/Bevel-
+    style. Returns `vital_age`, `chronological_age`, `delta_years` (+older / −younger),
+    `verdict`, `confidence`, and a `components` breakdown (HRV, cardio fitness, sleep,
+    activity) — each with its equivalent age, weight, and cited basis, plus a `headline` and
+    the `driver` (biggest lever). Transparent heuristic, NOT a medical biological-age test;
+    cardio fitness is VO₂max estimated from resting HR (±15%), which is why resting HR isn't
+    a separate line. Use for "how old is my body / what's my fitness age" and to point at the
+    single highest-impact thing to work on."""
+    return vital_age.compute() or {"error": "Not enough data to compute Vital Age yet."}
 
 
 @mcp.tool()
@@ -379,6 +393,14 @@ def show_readiness() -> str:
     """Show today's readiness ring with its component drivers (HRV, resting HR, sleep,
     training load, skin temp). Use when discussing today's recovery state."""
     return _shown("Today's readiness ring with its drivers")
+
+
+@mcp.tool()
+def show_vital_age() -> str:
+    """Show the Vital Age card inline: the big effective-age number, the gap vs their real
+    age, and a diverging younger←→older bar for each component (HRV, cardio fitness, sleep,
+    activity). Use when discussing how old their body behaves or which lever to pull."""
+    return _shown("Vital Age card with its component breakdown")
 
 
 @mcp.tool()
