@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from . import (
     auth, benchmarks, briefing, chat, coach, config, goals, insights, readiness,
-    sleep_analysis, store, sync, vital_age, workouts,
+    sleep_analysis, store, strain, sync, vital_age, workouts,
 )
 from .config import REGISTRY, REGISTRY_BY_NAME, settings
 
@@ -225,6 +225,42 @@ def sleep_detail() -> dict:
     if data is None:
         raise HTTPException(404, "Not enough sleep data yet.")
     return data
+
+
+@app.get("/api/rings")
+def rings() -> dict:
+    """The daily-snapshot trio (Strain / Recovery / Sleep), each 0-100, for the rings card.
+    Recovery = readiness, Sleep = last night's sleep score, Strain = today's cardio load on
+    the personal scale (+ its recovery-derived optimal band). Missing pieces come back null."""
+    rec = readiness.today_breakdown()
+    sd = sleep_analysis.detail()
+    ln = sd["last_night"] if sd else None
+    st = strain.today()
+    return {
+        "as_of": date.today().isoformat(),
+        "rings": [
+            {
+                "key": "strain", "label": "Strain",
+                "value": st["score"] if st else None,
+                "day": st["day"] if st else None,
+                "target": st["target"] if st else None,
+                "detail": st["detail"] if st else "No training-load history yet.",
+            },
+            {
+                "key": "recovery", "label": "Recovery",
+                "value": rec["score"] if rec else None,
+                "day": rec["date"] if rec else None,
+                "detail": rec["narrative"] if rec else "Not enough data to score recovery yet.",
+            },
+            {
+                "key": "sleep", "label": "Sleep",
+                "value": round(ln["score"]) if ln and ln.get("score") is not None else None,
+                "day": ln["day"] if ln else None,
+                "detail": (f"{ln['duration']:.1f} h · {ln['efficiency']:.0f}% efficient"
+                           if ln and ln.get("score") is not None else "No sleep score yet."),
+            },
+        ],
+    }
 
 
 @app.get("/api/vital-age")

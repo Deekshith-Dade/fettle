@@ -242,6 +242,7 @@ export const api = {
         value: number; unit: string; delta: number | null; good: boolean;
       }[];
     }>("/api/readiness"),
+  rings: () => get<RingsData>("/api/rings"),
   vitalAge: () => get<VitalAge>("/api/vital-age"),
   insights: () => get<{ insights: Insight[] }>("/api/insights"),
   workouts: (days = 60) => get<{ workouts: Workout[] }>(`/api/workouts?days=${days}`),
@@ -283,6 +284,16 @@ export const api = {
 
 export type ChatModel = { id: string; label: string; recommended: boolean };
 export type ChatToolCall = { name: string; label: string; input?: Record<string, unknown> };
+export type Ring = {
+  key: "strain" | "recovery" | "sleep";
+  label: string;
+  value: number | null;
+  day: string | null;
+  target?: { lo: number; hi: number } | null;
+  detail: string;
+};
+export type RingsData = { as_of: string; rings: Ring[] };
+
 export type VitalAgeComponent = {
   key: string; label: string; weight: number; delta: number;
   equiv_age: number | null; value: number | null; unit: string;

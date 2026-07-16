@@ -13,7 +13,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api, BenchmarksResponse, Briefing, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, SetupStatus, SleepDetail, VitalAge, Workout, WorkoutDetail } from "@/lib/api";
+import { api, BenchmarksResponse, Briefing, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, Ring, RingsData, SetupStatus, SleepDetail, VitalAge, Workout, WorkoutDetail } from "@/lib/api";
 import { BenchmarksView, SleepView, SleepTeaser, StandingTeaser } from "@/components/insights-views";
 import { CommandPalette } from "@/components/command-palette";
 import { SetupWizard } from "@/components/setup-wizard";
@@ -276,28 +276,99 @@ function useCountUp(target: number, ms = 900): number {
   return v;
 }
 
-function Ring({ score }: { score: number }) {
-  const shown = useCountUp(score);
-  const r = 104;
-  const c = 2 * Math.PI * r;
-  const offset = c * (1 - clamp(score, 0, 100) / 100);
-  const color = scoreColor(score);
+/* ————— daily rings (Strain / Recovery / Sleep) — Bevel-style trio ————— */
+
+// Each ring's [start (lighter), end (saturated), glow] for dark and light themes.
+const RING_COLORS: Record<Ring["key"], { a: string; b: string; glow: string; aL: string; bL: string }> = {
+  strain:   { a: "#f6c886", b: "#ff6a1f", glow: "#ff6a1f", aL: "#dd8f34", bL: "#c1520c" },
+  recovery: { a: "#dcf46f", b: "#5fae14", glow: "#8fd42a", aL: "#7ba31c", bL: "#4c7a0b" },
+  sleep:    { a: "#bfc4ff", b: "#5a68e0", glow: "#7f8bf0", aL: "#8b96e6", bL: "#3f4bb0" },
+};
+
+// Point on the ring centreline at `frac` (0..1) clockwise from the top, at `radius`.
+function ptOnRing(frac: number, radius: number): [number, number] {
+  const a = (frac * 360 - 90) * (Math.PI / 180);
+  return [60 + radius * Math.cos(a), 60 + radius * Math.sin(a)];
+}
+
+function ScoreRing({ ring, onClick }: { ring: Ring; onClick?: () => void }) {
+  const light = typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "light";
+  const col = RING_COLORS[ring.key];
+  const a = light ? col.aL : col.a;
+  const b = light ? col.bL : col.b;
+  const v = ring.value;
+  const shown = useCountUp(v ?? 0);
+  const R = 50, SW = 9, C = 2 * Math.PI * R;
+  const pct = clamp(v ?? 0, 0, 100);
+  const tgt = ring.key === "strain" ? ring.target : null;
+  const [dx, dy] = ptOnRing(0, R); // leading dot sits at the top (arc start)
   return (
-    <div className="ring">
-      <svg width="240" height="240" viewBox="0 0 240 240">
-        {/* tick ring — the instrument bezel */}
-        <circle cx="120" cy="120" r="115" fill="none" stroke="rgba(130,130,130,0.22)"
-          strokeWidth="4" strokeDasharray="1.5 10.55" />
-        <circle cx="120" cy="120" r={r} fill="none" stroke="rgba(130,130,130,0.15)" strokeWidth="10" />
-        <circle
-          cx="120" cy="120" r={r} fill="none" stroke={color} strokeWidth="10" strokeLinecap="round"
-          strokeDasharray={c} strokeDashoffset={offset}
-          style={{ transition: "stroke-dashoffset 1.1s cubic-bezier(0.2,0.8,0.2,1)", filter: `drop-shadow(0 0 9px ${color}59)` }}
-        />
-      </svg>
-      <div className="ring-center">
-        <span className="ring-score" style={{ color }}>{shown}</span>
-        <span className="ring-label">Readiness</span>
+    <div className={`sring${onClick ? " tap" : ""}`} onClick={onClick}
+      role={onClick ? "button" : undefined} tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => (e.key === "Enter" || e.key === " ") && onClick() : undefined}
+      title={ring.detail}>
+      <div className="sring-graphic">
+        <svg viewBox="0 0 120 120" className="sring-svg">
+          <defs>
+            <linearGradient id={`rg-${ring.key}`} x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor={a} />
+              <stop offset="100%" stopColor={b} />
+            </linearGradient>
+            <pattern id={`rh-${ring.key}`} patternUnits="userSpaceOnUse" width="4.5" height="4.5" patternTransform="rotate(45)">
+              <line x1="0" y1="0" x2="0" y2="4.5" stroke={light ? "#c08a3d" : "#caa05a"} strokeWidth="2.3" opacity="0.5" />
+            </pattern>
+          </defs>
+          <circle cx="60" cy="60" r={R} fill="none" strokeWidth={SW}
+            stroke={light ? "rgba(18,22,28,0.09)" : "rgba(255,255,255,0.065)"} />
+          {tgt && (
+            <circle cx="60" cy="60" r={R} fill="none" stroke={`url(#rh-${ring.key})`} strokeWidth={SW}
+              strokeDasharray={`${((tgt.hi - tgt.lo) / 100) * C} ${C}`}
+              strokeDashoffset={-(tgt.lo / 100) * C} transform="rotate(-90 60 60)" />
+          )}
+          {v != null && (
+            <circle cx="60" cy="60" r={R} fill="none" stroke={`url(#rg-${ring.key})`} strokeWidth={SW}
+              strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - pct / 100)}
+              transform="rotate(-90 60 60)"
+              style={{ transition: "stroke-dashoffset 1.1s cubic-bezier(0.2,0.8,0.2,1)", filter: `drop-shadow(0 0 5px ${col.glow}66)` }} />
+          )}
+          {tgt && [tgt.lo, tgt.hi].map((t) => {
+            const [x1, y1] = ptOnRing(t / 100, R - SW / 2 - 1.5);
+            const [x2, y2] = ptOnRing(t / 100, R + SW / 2 + 1.5);
+            return <line key={t} x1={x1} y1={y1} x2={x2} y2={y2} strokeWidth="1.4" opacity="0.75"
+              stroke={light ? "#3a3f47" : "#e8eaee"} />;
+          })}
+          {v != null && pct > 2 && (
+            <circle cx={dx} cy={dy} r={SW / 2 + 0.5} fill={a}
+              style={{ filter: `drop-shadow(0 0 5px ${col.glow})` }} />
+          )}
+        </svg>
+        <div className="sring-center">
+          <span className="sring-val">
+            {v == null ? "—" : shown}{v != null && <span className="sring-pct">%</span>}
+          </span>
+        </div>
+      </div>
+      <span className="sring-label">{ring.label}</span>
+    </div>
+  );
+}
+
+function ScoreRings({ data, onOpen, onGo }: {
+  data: RingsData; onOpen: (m: string) => void; onGo: (v: string) => void;
+}) {
+  const click: Record<Ring["key"], (() => void) | undefined> = {
+    strain: () => onOpen("cardio-load"),
+    recovery: undefined, // the drivers breakdown sits right below
+    sleep: () => onGo("sleep"),
+  };
+  return (
+    <div className="rings-card">
+      <div className="rings-row">
+        {data.rings.map((r) => <ScoreRing key={r.key} ring={r} onClick={click[r.key]} />)}
+      </div>
+      <div className="rings-foot">
+        <span className="rings-date">{heroDateLabel(data.as_of).replace("Today · ", "")}</span>
+        <span className="rings-brand"><span className="dot" aria-hidden /> fettle</span>
       </div>
     </div>
   );
@@ -1459,6 +1530,7 @@ export default function Dashboard() {
   const [benchmarks, setBenchmarks] = useState<BenchmarksResponse | null>(null);
   const [sleepDetail, setSleepDetail] = useState<SleepDetail | null>(null);
   const [vitalAge, setVitalAge] = useState<VitalAge | null>(null);
+  const [rings, setRings] = useState<RingsData | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function loadGoals() {
@@ -1482,7 +1554,7 @@ export default function Dashboard() {
   // has no reload gesture).
   const lastLoadedAt = useRef(0);
   async function loadData() {
-    const [dts, bulk, r, ins, rec, bm, sd, va] = await Promise.all([
+    const [dts, bulk, r, ins, rec, bm, sd, va, rg] = await Promise.all([
       api.dataTypes(),
       api.dailyBulk(),
       api.readiness().catch(() => null),
@@ -1491,6 +1563,7 @@ export default function Dashboard() {
       api.benchmarks().catch(() => null),
       api.sleepDetail().catch(() => null),
       api.vitalAge().catch(() => null),
+      api.rings().catch(() => null),
     ]);
     setTypes(dts);
     setDailyCache(bulk.series);
@@ -1500,6 +1573,7 @@ export default function Dashboard() {
     setBenchmarks(bm);
     setSleepDetail(sd);
     setVitalAge(va);
+    setRings(rg);
     loadGoals();
     refreshSyncMeta();
     lastLoadedAt.current = Date.now();
@@ -1651,7 +1725,7 @@ export default function Dashboard() {
         if (flashTimer.current) clearTimeout(flashTimer.current);
         flashTimer.current = setTimeout(() => setSyncFlash(null), 5000);
       }
-      const [bulk, r, ins, rec, bm, sd, va] = await Promise.all([
+      const [bulk, r, ins, rec, bm, sd, va, rg] = await Promise.all([
         api.dailyBulk(),
         api.readiness().catch(() => null),
         api.insights().then((x) => x.insights).catch(() => []),
@@ -1659,6 +1733,7 @@ export default function Dashboard() {
         api.benchmarks().catch(() => null),
         api.sleepDetail().catch(() => null),
         api.vitalAge().catch(() => null),
+        api.rings().catch(() => null),
       ]);
       setDailyCache(bulk.series);
       setIntradayCache({});
@@ -1668,6 +1743,7 @@ export default function Dashboard() {
       setBenchmarks(bm);
       setSleepDetail(sd);
       setVitalAge(va);
+      setRings(rg);
       loadGoals();
       refreshSyncMeta();
     } catch (e) {
@@ -1853,53 +1929,81 @@ export default function Dashboard() {
           <h1>fettle</h1>
         </div>
         <div className="controls">
-          <button className="searchpill" onClick={() => setPaletteOpen(true)}
-            aria-label="Search metrics" title="Search metrics (⌘K)">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" aria-hidden>
-              <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" />
-            </svg>
-            <span className="searchpill-label">Search</span>
-            <kbd className="searchpill-kbd">⌘K</kbd>
-          </button>
-          <button className="btn theme-toggle" onClick={cycleTheme}
-            title={`Theme: ${theme}${theme === "system" ? " · follows your device" : ""}`}
-            aria-label={`Theme: ${theme}. Click to change.`}>
-            {theme === "system" ? (
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <rect x="3" y="4" width="18" height="12" rx="1.5" /><path d="M8 20h8M12 16v4" />
+          {/* utilities */}
+          <div className="ctl-group">
+            <button className="searchpill" onClick={() => setPaletteOpen(true)}
+              aria-label="Search metrics" title="Search metrics (⌘K)">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" aria-hidden>
+                <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" />
               </svg>
-            ) : theme === "light" ? (
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-              </svg>
+              <span className="searchpill-label">Search</span>
+              <kbd className="searchpill-kbd">⌘K</kbd>
+            </button>
+            <button className="btn theme-toggle" onClick={cycleTheme}
+              title={`Theme: ${theme}${theme === "system" ? " · follows your device" : ""}`}
+              aria-label={`Theme: ${theme}. Click to change.`}>
+              {theme === "system" ? (
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <rect x="3" y="4" width="18" height="12" rx="1.5" /><path d="M8 20h8M12 16v4" />
+                </svg>
+              ) : theme === "light" ? (
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M19.5 14.5A8 8 0 0 1 9.5 4.3 8 8 0 1 0 19.5 14.5z" />
+                </svg>
+              )}
+            </button>
+          </div>
+
+          <span className="ctl-sep" aria-hidden />
+
+          {/* connection status — one merged pill + sync freshness */}
+          <div className="ctl-group ctl-status">
+            {syncFlash ? (
+              <span className="flash">{syncFlash}</span>
+            ) : lastSynced ? (
+              <span className="syncmeta">synced {relTime(lastSynced)}</span>
+            ) : null}
+            {authed === null ? (
+              <span className="pill">checking…</span>
+            ) : authed ? (
+              (() => {
+                const warn = tokenDays != null && tokenDays <= 2;
+                const label = warn
+                  ? (tokenDays! <= 0 ? "re-auth needed" : `re-auth in ${Math.floor(tokenDays!)}d`)
+                  : "connected";
+                return (
+                  <span className={`pill status-pill ${warn ? "warn" : "ok"}`}
+                    title={tokenDays != null
+                      ? `Google Health connected · Testing-mode token expires in ${Math.max(0, Math.floor(tokenDays))}d`
+                      : "Google Health connected"}>
+                    <span className="status-dot" aria-hidden />
+                    {label}
+                    {!warn && tokenDays != null && <span className="status-sub">{Math.floor(tokenDays)}d</span>}
+                  </span>
+                );
+              })()
             ) : (
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M19.5 14.5A8 8 0 0 1 9.5 4.3 8 8 0 1 0 19.5 14.5z" />
-              </svg>
+              <a className="btn btn-lime" href={api.loginUrl()}>Connect Google Health</a>
             )}
-          </button>
-          {syncFlash && <span className="flash">{syncFlash}</span>}
-          {lastSynced && !syncFlash && <span className="syncmeta">synced {relTime(lastSynced)}</span>}
-          {authed === null ? (
-            <span className="pill">checking…</span>
-          ) : authed ? (
-            <span className="pill ok">connected</span>
-          ) : (
-            <a className="btn btn-lime" href={api.loginUrl()}>Connect Google Health</a>
-          )}
-          {authed && tokenDays != null && (
-            <span className={`pill${tokenDays <= 2 ? " warn" : ""}`} title="Testing-mode tokens last 7 days from consent">
-              {tokenDays <= 0 ? "re-auth needed" : `re-auth in ${Math.floor(tokenDays)}d`}
-            </span>
-          )}
-          <a className="btn btn-coach" href="/coach" title="Ask your data anything" aria-label="Coach">
-            <span className="btn-coach-label">Coach</span>
-            <span className="coach-star" aria-hidden>✦</span>
-          </a>
-          <button className="btn btn-lime" onClick={runSync} disabled={syncing || !authed}>
-            {syncing && <span className="spinner" aria-hidden />}
-            {syncing ? "Syncing" : "Sync"}
-          </button>
+          </div>
+
+          <span className="ctl-sep" aria-hidden />
+
+          {/* actions */}
+          <div className="ctl-group">
+            <a className="btn btn-coach" href="/coach" title="Ask your data anything" aria-label="Coach">
+              <span className="btn-coach-label">Coach</span>
+              <span className="coach-star" aria-hidden>✦</span>
+            </a>
+            <button className="btn btn-lime" onClick={runSync} disabled={syncing || !authed}>
+              {syncing && <span className="spinner" aria-hidden />}
+              {syncing ? "Syncing" : "Sync"}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1954,51 +2058,51 @@ export default function Dashboard() {
             <i className="secnav-fade fade-r" aria-hidden />
           </div>
 
-          {/* ———— OVERVIEW · readiness hero ———— */}
-          {view === "overview" && readiness && (
+          {/* ———— OVERVIEW · daily rings hero (Strain / Recovery / Sleep) ———— */}
+          {view === "overview" && (rings || readiness) && (
             <section
-              className="hero rise"
-              style={{ animationDelay: "40ms", "--hero-glow": `${scoreColor(readiness.score)}12` } as CSSProperties}
+              className="hero-day rise"
+              style={{ animationDelay: "40ms", "--hero-glow": readiness ? `${scoreColor(readiness.score)}12` : "transparent" } as CSSProperties}
             >
-              <div className="ring-wrap">
-                <Ring score={readiness.score} />
-              </div>
-              <div className="hero-copy">
-                <p className="eyebrow" style={{ marginBottom: 10 }}>{heroDateLabel(readiness.date)}</p>
-                <h2 className="tone">
-                  You're <span className="accent" style={{ color: scoreColor(readiness.score) }}>{readiness.tone}</span>
-                </h2>
-                <p className="narrative">{readiness.narrative}</p>
-                <div className="drivers">
-                  {readiness.components.map((c) => {
-                    const metric = DRIVER_METRIC[c.key];
-                    const canOpen = metric && infoByName[metric];
-                    return (
-                      <button
-                        className="driver" key={c.key} disabled={!canOpen}
-                        onClick={() => canOpen && setOpen(metric)}
-                        title={canOpen ? `Open ${c.label} · ${c.score}/100` : `${c.score}/100`}
-                      >
-                        <span className="d-label">{c.label}</span>
-                        <span className="d-track">
-                          <span className="d-fill" style={{ width: `${c.score}%`, background: scoreColor(c.score) }} />
-                        </span>
-                        <span className="d-val">
-                          {formatNum(c.value)} <span className="u">{c.unit}</span>
-                          {c.delta != null && (
-                            <span className={`tr ${c.good ? "good" : "off"}`} title={`${c.delta >= 0 ? "+" : ""}${formatNum(c.delta)} vs baseline`}>
-                              {c.delta >= 0 ? "▲" : "▼"}
-                            </span>
-                          )}
-                        </span>
-                      </button>
-                    );
-                  })}
+              {rings && <ScoreRings data={rings} onOpen={setOpen} onGo={go} />}
+              {readiness && (
+                <div className="hero-readout">
+                  {rings && <div className="hero-div" aria-hidden />}
+                  <p className="hero-tone-line">
+                    You're <span className="accent" style={{ color: scoreColor(readiness.score) }}>{readiness.tone}</span>
+                    <span className="hero-narr"> — {readiness.narrative}</span>
+                  </p>
+                  <div className="drivers">
+                    {readiness.components.map((c) => {
+                      const metric = DRIVER_METRIC[c.key];
+                      const canOpen = metric && infoByName[metric];
+                      return (
+                        <button
+                          className="driver" key={c.key} disabled={!canOpen}
+                          onClick={() => canOpen && setOpen(metric)}
+                          title={canOpen ? `Open ${c.label} · ${c.score}/100` : `${c.score}/100`}
+                        >
+                          <span className="d-label">{c.label}</span>
+                          <span className="d-track">
+                            <span className="d-fill" style={{ width: `${c.score}%`, background: scoreColor(c.score) }} />
+                          </span>
+                          <span className="d-val">
+                            {formatNum(c.value)} <span className="u">{c.unit}</span>
+                            {c.delta != null && (
+                              <span className={`tr ${c.good ? "good" : "off"}`} title={`${c.delta >= 0 ? "+" : ""}${formatNum(c.delta)} vs baseline`}>
+                                {c.delta >= 0 ? "▲" : "▼"}
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {readinessStrip.some((s) => s.value != null) && (
+                    <ReadinessStrip data={readinessStrip} />
+                  )}
                 </div>
-                {readinessStrip.some((s) => s.value != null) && (
-                  <ReadinessStrip data={readinessStrip} />
-                )}
-              </div>
+              )}
             </section>
           )}
 
