@@ -272,9 +272,13 @@ body::before {
   content: ""; position: absolute; left: 0; top: 12%; bottom: 26%; width: 1px; background: var(--line);
 }
 .sring.tap { cursor: pointer; border-radius: 18px; transition: background 0.16s; }
-.sring.tap:hover { background: var(--panel-hi); }
+/* pointer devices only — a bare :hover sticks after a tap on touch screens, leaving a
+   grey box behind the ring that was tapped */
+@media (hover: hover) { .sring.tap:hover { background: var(--panel-hi); } }
 .sring.tap:focus-visible { outline: 2px solid var(--lime); outline-offset: 2px; }
-.sring-graphic { position: relative; width: 150px; height: 150px; max-width: 42vw; }
+/* fill the grid cell (up to 150px) and stay square — three fixed 150px/42vw rings
+   overflowed the card on phones and clipped the third one under overflow:hidden */
+.sring-graphic { position: relative; width: 100%; max-width: 150px; aspect-ratio: 1; }
 .sring-svg { width: 100%; height: 100%; display: block; }
 .sring-center { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 .sring-val {
