@@ -130,12 +130,11 @@ body::before {
 .ctl-status { gap: 12px; }
 .ctl-sep { width: 1px; height: 18px; background: var(--line); flex: none; }
 .status-pill { display: inline-flex; align-items: center; gap: 7px; }
+.status-pill { text-decoration: none; }
 .status-pill .status-dot {
   width: 6px; height: 6px; border-radius: 50%; background: currentColor;
   box-shadow: 0 0 7px 0 currentColor; flex: none;
 }
-.status-pill .status-sub { color: var(--faint); font-variant-numeric: tabular-nums; }
-.status-pill .status-sub::before { content: "·"; margin-right: 5px; opacity: 0.55; }
 @media (max-width: 720px) {
   .ctl-sep { display: none; }
   .ctl-status .syncmeta { display: none; }

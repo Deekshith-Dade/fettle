@@ -167,6 +167,10 @@ function AcwrGauge({ g }: { g: { value: number; zones: number[]; max: number } }
 
 function clamp(x: number, a: number, b: number) { return Math.max(a, Math.min(b, x)); }
 
+// The connection is silent when healthy; the topbar only speaks up this many days
+// before the (Testing-mode, 7-day) token expires. Bump if you want more lead time.
+const REAUTH_WARN_DAYS = 3;
+
 function seriesVals(pts?: Point[]): number[] {
   return (pts ?? []).map((p) => p.value).filter((v): v is number => v != null);
 }
@@ -1960,38 +1964,27 @@ export default function Dashboard() {
 
           <span className="ctl-sep" aria-hidden />
 
-          {/* connection status — one merged pill + sync freshness */}
+          {/* connection status — silent when healthy; speaks up only when action is due */}
           <div className="ctl-group ctl-status">
             {syncFlash ? (
               <span className="flash">{syncFlash}</span>
             ) : lastSynced ? (
               <span className="syncmeta">synced {relTime(lastSynced)}</span>
             ) : null}
-            {authed === null ? (
-              <span className="pill">checking…</span>
-            ) : authed ? (
-              (() => {
-                const warn = tokenDays != null && tokenDays <= 2;
-                const label = warn
-                  ? (tokenDays! <= 0 ? "re-auth needed" : `re-auth in ${Math.floor(tokenDays!)}d`)
-                  : "connected";
-                return (
-                  <span className={`pill status-pill ${warn ? "warn" : "ok"}`}
-                    title={tokenDays != null
-                      ? `Google Health connected · Testing-mode token expires in ${Math.max(0, Math.floor(tokenDays))}d`
-                      : "Google Health connected"}>
-                    <span className="status-dot" aria-hidden />
-                    {label}
-                    {!warn && tokenDays != null && <span className="status-sub">{Math.floor(tokenDays)}d</span>}
-                  </span>
-                );
-              })()
-            ) : (
+            {authed === false ? (
               <a className="btn btn-lime" href={api.loginUrl()}>Connect Google Health</a>
-            )}
+            ) : authed && tokenDays != null && tokenDays <= REAUTH_WARN_DAYS ? (
+              <a className="pill status-pill warn" href={api.loginUrl()}
+                title="Testing-mode tokens last 7 days from consent — click to reconnect">
+                <span className="status-dot" aria-hidden />
+                {tokenDays <= 0 ? "re-auth needed" : `re-auth in ${Math.floor(tokenDays)}d`}
+              </a>
+            ) : null}
           </div>
 
-          <span className="ctl-sep" aria-hidden />
+          {(authed === false || (authed && tokenDays != null && tokenDays <= REAUTH_WARN_DAYS) || syncFlash || lastSynced) && (
+            <span className="ctl-sep" aria-hidden />
+          )}
 
           {/* actions */}
           <div className="ctl-group">
