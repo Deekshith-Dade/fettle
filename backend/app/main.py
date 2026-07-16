@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from . import (
     auth, benchmarks, briefing, chat, coach, config, goals, insights, readiness,
-    sleep_analysis, store, sync, workouts,
+    sleep_analysis, store, sync, vital_age, workouts,
 )
 from .config import REGISTRY, REGISTRY_BY_NAME, settings
 
@@ -224,6 +224,15 @@ def sleep_detail() -> dict:
     data = sleep_analysis.detail()
     if data is None:
         raise HTTPException(404, "Not enough sleep data yet.")
+    return data
+
+
+@app.get("/api/vital-age")
+def vital_age_endpoint() -> dict:
+    """Effective ('vital') age from age-referenced norms — WHOOP/Bevel-style, transparent."""
+    data = vital_age.compute()
+    if data is None:
+        raise HTTPException(404, "Not enough data to compute Vital Age yet.")
     return data
 
 

@@ -60,6 +60,13 @@ class Settings(BaseSettings):
     # Where the OAuth callback sends the browser after a successful connect.
     frontend_url: str = "http://localhost:3400"
 
+    # Owner profile — used by age/sex-referenced analytics (Vital Age, benchmarks).
+    # Google's `profile` scope isn't reliably populated, so set your real values in
+    # backend/.env (birth_date=YYYY-MM-DD, sex=male|female) — these are placeholders,
+    # kept out of config so no birth date lives in the repo.
+    birth_date: str = "1995-01-01"
+    sex: str = "male"
+
 
 settings = Settings()
 

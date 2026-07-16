@@ -13,7 +13,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api, BenchmarksResponse, Briefing, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, SetupStatus, SleepDetail, Workout, WorkoutDetail } from "@/lib/api";
+import { api, BenchmarksResponse, Briefing, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, SetupStatus, SleepDetail, VitalAge, Workout, WorkoutDetail } from "@/lib/api";
 import { BenchmarksView, SleepView, SleepTeaser, StandingTeaser } from "@/components/insights-views";
 import { CommandPalette } from "@/components/command-palette";
 import { SetupWizard } from "@/components/setup-wizard";
@@ -820,6 +820,87 @@ function ReadinessStrip({ data }: { data: { day: string; value: number | null }[
   );
 }
 
+/* ————— vital age ————— */
+
+// Younger-than-birthday is good (lime); older nudges amber, then rose past ~6y. Diverging
+// tone so the card reads at a glance without a legend. Deepened variants on the paper theme.
+function vitalTone(delta: number): string {
+  const light = typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "light";
+  if (delta < 0.4) return light ? "#5f8c0f" : "#cdf24e";      // younger / on par
+  if (delta <= 6) return light ? "#a9710c" : "#f4c257";       // mildly older
+  return light ? "#cf4d63" : "#f47a8f";                        // notably older
+}
+
+function VitalAgeCard({ data, onOpenSleep }: { data: VitalAge; onOpenSleep: () => void }) {
+  const tone = vitalTone(data.delta_years);
+  const CAP = 12; // matches the backend DEV_CAP — the diverging bar's half-width
+  const deltaWord =
+    data.verdict === "on par"
+      ? `on par with your ${data.chronological_age.toFixed(0)}`
+      : `${Math.abs(data.delta_years).toFixed(1)}y ${data.verdict} than your ${data.chronological_age.toFixed(0)}`;
+
+  return (
+    <section className="section rise vital" style={{ animationDelay: "60ms", "--vt": tone } as CSSProperties}>
+      <div className="vital-head">
+        <p className="eyebrow">Vital age</p>
+        <span className="vital-conf" title={data.method}>
+          {data.confidence} confidence · {data.nights} nights
+        </span>
+      </div>
+
+      <div className="vital-top">
+        <div className="vital-figure">
+          <span className="vital-big" style={{ color: tone }}>{data.vital_age.toFixed(1)}</span>
+          <span className="vital-delta">
+            {data.verdict !== "on par" && (
+              <span className="vital-arrow" style={{ color: tone }}>{data.delta_years > 0 ? "▲" : "▼"}</span>
+            )}
+            {deltaWord}
+          </span>
+        </div>
+        <p className="vital-headline">{data.headline}</p>
+      </div>
+
+      <div className="vital-comps">
+        {data.components.map((c) => {
+          const ct = vitalTone(c.delta);
+          const frac = Math.max(-1, Math.min(1, c.delta / CAP));
+          const younger = c.delta < 0;
+          // Diverging bar: centre = your age; segment runs left (younger) or right (older).
+          const segLeft = younger ? 50 + frac * 50 : 50;
+          const segWidth = Math.abs(frac) * 50;
+          const opensDrawer = c.key === "sleep";
+          return (
+            <button
+              key={c.key}
+              className="vc"
+              disabled={!opensDrawer}
+              onClick={() => opensDrawer && onOpenSleep()}
+              title={`${c.detail}\n\nBasis: ${c.basis}`}
+            >
+              <span className="vc-label">{c.label}</span>
+              <span className="vc-bar" aria-hidden>
+                <i className="vc-mid" />
+                <i className="vc-seg" style={{ left: `${segLeft}%`, width: `${segWidth}%`, background: ct }} />
+              </span>
+              <span className="vc-val" style={{ color: ct }}>
+                {c.equiv_age != null
+                  ? `~${c.equiv_age.toFixed(0)}y`
+                  : `${c.delta >= 0 ? "+" : "−"}${Math.abs(c.delta).toFixed(1)}y`}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <p className="vital-foot">
+        Compares your habits to age-referenced norms — a transparent heuristic, not a medical
+        biological-age test. Cardio fitness is estimated from resting HR (±15%).
+      </p>
+    </section>
+  );
+}
+
 /* ————— goals ————— */
 
 const GOAL_STATUS: Record<Goal["status"], { color: string; word: string }> = {
@@ -1377,6 +1458,7 @@ export default function Dashboard() {
   const [goalsSummary, setGoalsSummary] = useState<GoalsResponse["summary"] | null>(null);
   const [benchmarks, setBenchmarks] = useState<BenchmarksResponse | null>(null);
   const [sleepDetail, setSleepDetail] = useState<SleepDetail | null>(null);
+  const [vitalAge, setVitalAge] = useState<VitalAge | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function loadGoals() {
@@ -1400,7 +1482,7 @@ export default function Dashboard() {
   // has no reload gesture).
   const lastLoadedAt = useRef(0);
   async function loadData() {
-    const [dts, bulk, r, ins, rec, bm, sd] = await Promise.all([
+    const [dts, bulk, r, ins, rec, bm, sd, va] = await Promise.all([
       api.dataTypes(),
       api.dailyBulk(),
       api.readiness().catch(() => null),
@@ -1408,6 +1490,7 @@ export default function Dashboard() {
       api.coach().then((x) => x.recommendations).catch(() => []),
       api.benchmarks().catch(() => null),
       api.sleepDetail().catch(() => null),
+      api.vitalAge().catch(() => null),
     ]);
     setTypes(dts);
     setDailyCache(bulk.series);
@@ -1416,6 +1499,7 @@ export default function Dashboard() {
     setCoachRecs(rec);
     setBenchmarks(bm);
     setSleepDetail(sd);
+    setVitalAge(va);
     loadGoals();
     refreshSyncMeta();
     lastLoadedAt.current = Date.now();
@@ -1567,13 +1651,14 @@ export default function Dashboard() {
         if (flashTimer.current) clearTimeout(flashTimer.current);
         flashTimer.current = setTimeout(() => setSyncFlash(null), 5000);
       }
-      const [bulk, r, ins, rec, bm, sd] = await Promise.all([
+      const [bulk, r, ins, rec, bm, sd, va] = await Promise.all([
         api.dailyBulk(),
         api.readiness().catch(() => null),
         api.insights().then((x) => x.insights).catch(() => []),
         api.coach().then((x) => x.recommendations).catch(() => []),
         api.benchmarks().catch(() => null),
         api.sleepDetail().catch(() => null),
+        api.vitalAge().catch(() => null),
       ]);
       setDailyCache(bulk.series);
       setIntradayCache({});
@@ -1582,6 +1667,7 @@ export default function Dashboard() {
       setCoachRecs(rec);
       setBenchmarks(bm);
       setSleepDetail(sd);
+      setVitalAge(va);
       loadGoals();
       refreshSyncMeta();
     } catch (e) {
@@ -1914,6 +2000,11 @@ export default function Dashboard() {
                 )}
               </div>
             </section>
+          )}
+
+          {/* ———— OVERVIEW · vital age ———— */}
+          {view === "overview" && vitalAge && (
+            <VitalAgeCard data={vitalAge} onOpenSleep={() => setOpen("sleep-duration")} />
           )}
 
           {/* ———— OVERVIEW · goals + today's focus + at a glance + teasers ———— */}

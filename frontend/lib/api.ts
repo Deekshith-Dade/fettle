@@ -242,6 +242,7 @@ export const api = {
         value: number; unit: string; delta: number | null; good: boolean;
       }[];
     }>("/api/readiness"),
+  vitalAge: () => get<VitalAge>("/api/vital-age"),
   insights: () => get<{ insights: Insight[] }>("/api/insights"),
   workouts: (days = 60) => get<{ workouts: Workout[] }>(`/api/workouts?days=${days}`),
   workoutDetail: (id: string) =>
@@ -282,6 +283,25 @@ export const api = {
 
 export type ChatModel = { id: string; label: string; recommended: boolean };
 export type ChatToolCall = { name: string; label: string; input?: Record<string, unknown> };
+export type VitalAgeComponent = {
+  key: string; label: string; weight: number; delta: number;
+  equiv_age: number | null; value: number | null; unit: string;
+  detail: string; basis: string;
+};
+export type VitalAge = {
+  as_of: string;
+  chronological_age: number;
+  vital_age: number;
+  delta_years: number;
+  verdict: "younger" | "older" | "on par";
+  confidence: "high" | "moderate" | "low";
+  nights: number;
+  driver: string;
+  headline: string;
+  components: VitalAgeComponent[];
+  method: string;
+};
+
 export type ChatAttachment = { id: string; name: string };
 /** A show_* tool call the coach made — the UI mounts the matching live widget. */
 export type ChatWidgetSpec = { kind: string; params?: Record<string, unknown> };
