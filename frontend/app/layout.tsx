@@ -24,6 +24,22 @@ export const metadata: Metadata = {
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "fettle" },
   // Health numerals everywhere; don't let iOS turn digit runs into phone links.
   formatDetection: { telephone: false },
+  // The home-screen icon must be an absolute ts.net URL: iOS fetches it with a
+  // system service that only trusts public CAs, so the proxy's mkcert cert gets a
+  // letter tile. The tailscale-serve origin (same app, :8444) carries a Let's
+  // Encrypt cert that service accepts, and tailscaled renews it unattended.
+  icons: {
+    // Declaring `icons` disables the app/-file auto-links, so the favicon must be
+    // re-declared here (the file itself still serves at /icon.svg).
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    apple: [
+      {
+        url: "https://deekshiths-macbook-pro.tailf61950.ts.net:8444/apple-touch-icon.png",
+        type: "image/png",
+        sizes: "180x180",
+      },
+    ],
+  },
 };
 
 export const viewport: Viewport = {
