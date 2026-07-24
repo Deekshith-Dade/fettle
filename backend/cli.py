@@ -5,6 +5,7 @@
     python cli.py sync steps sleep  # sync only specific types
     python cli.py status            # show per-type watermarks
     python cli.py backup            # snapshot health.db (+tokens) to iCloud Drive
+    python cli.py remind            # nudge for schedule blocks starting soon
 """
 from __future__ import annotations
 
@@ -98,6 +99,41 @@ def cmd_backup() -> int:
     return 0
 
 
+def cmd_remind() -> int:
+    """Nudges for schedule blocks starting within the look-ahead window — run every
+    quarter hour by com.fettle.schedule. Blocks already marked done (or with remind
+    off) stay silent; per-day keys in notify_state.json stop repeats."""
+    from datetime import date as _date
+    from datetime import datetime, timedelta
+
+    from app import notify, schedule
+
+    store.init_db()
+    schedule.ensure_seed()
+    state = notify._load_state()
+    fired: dict = state.setdefault("fired", {})
+
+    # Drop schedule keys older than yesterday so the state file doesn't grow forever.
+    stale = (_date.today() - timedelta(days=1)).isoformat()
+    for key in [k for k in fired if k.startswith("sched:") and k[6:16] < stale]:
+        del fired[key]
+
+    sent = 0
+    for key, title, body in schedule.due_reminders(datetime.now()):
+        if key in fired:
+            continue
+        # Short TTL: a phone that's offline past the block's start shouldn't get
+        # a stale nudge at midnight.
+        ok = notify.deliver(title, body, ttl=900)
+        fired[key] = datetime.now().astimezone().isoformat()
+        print(f"remind: {title} (delivered={ok})")
+        sent += 1
+    notify._save_state(state)
+    if not sent:
+        print("remind: nothing due")
+    return 0
+
+
 def cmd_status() -> int:
     store.init_db()
     rows = store.sync_status()
@@ -125,6 +161,8 @@ def main(argv: list[str]) -> int:
         return cmd_status()
     if cmd == "backup":
         return cmd_backup()
+    if cmd == "remind":
+        return cmd_remind()
     print(f"Unknown command '{cmd}'.\n{__doc__}")
     return 1
 

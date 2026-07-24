@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "fettle": {
+      "command": "/Users/deekshith/Documents/Projects/agents/claude-agents/fettle/backend/.venv-mcp/bin/python",
+      "args": [
+        "/Users/deekshith/Documents/Projects/agents/claude-agents/fettle/backend/mcp_server.py"
+      ]
+    }
+  }
+}

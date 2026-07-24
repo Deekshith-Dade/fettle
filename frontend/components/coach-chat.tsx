@@ -24,6 +24,10 @@ import { bustWidgetCache, ChatWidget } from "./chat-widgets";
 // Tool calls that change stored goals — any goals widget rendered after one of these
 // must refetch rather than reuse the 60s cache.
 const GOAL_MUTATIONS = new Set(["fettle_create_goal", "fettle_update_goal", "fettle_delete_goal"]);
+const SCHEDULE_MUTATIONS = new Set([
+  "fettle_log_block", "fettle_create_schedule_block", "fettle_edit_schedule_block",
+  "fettle_remove_schedule_block", "fettle_add_schedule_oneoff",
+]);
 
 const SUGGESTIONS: { glyph: string; q: string }[] = [
   { glyph: "◎", q: "How's my recovery today, and what's driving it?" },
@@ -466,6 +470,7 @@ export default function CoachChat() {
           meta: (m) => { setActiveId((cur) => cur ?? m.conversation_id); refreshConvs(); },
           tool: (t) => {
             if (GOAL_MUTATIONS.has(t.name)) bustWidgetCache("goals");
+            if (SCHEDULE_MUTATIONS.has(t.name)) bustWidgetCache("schedule");
             liveRef.current.tools.push(t);
             push();
           },

@@ -19,7 +19,7 @@ import subprocess
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from . import auth, benchmarks, config, goals, insights, readiness, sleep_analysis, store
+from . import auth, benchmarks, config, goals, insights, readiness, schedule, sleep_analysis, store
 from .chat import REPO_ROOT, _opencode_bin, _opencode_env, _plain, resolve_model
 from .config import REGISTRY, REGISTRY_BY_NAME
 
@@ -183,6 +183,7 @@ def build_evidence() -> dict[str, Any]:
         "readiness": readiness.today_breakdown(),
         "sleep": _slim_sleep(sleep_analysis.detail()),
         "goals": _slim_goals(goals.evaluate_all()),
+        "schedule": schedule.today_evidence(),
         "benchmarks": _slim_benchmarks(benchmarks.evaluate_all()),
         # Complete days only — today's accumulating partials live in today_so_far.
         "summary_30d": _summary_30d(insights.complete_days(bulk)),
@@ -268,6 +269,8 @@ def build_weekly_evidence() -> dict[str, Any]:
         "system": _system_status(),
         "metrics_week_over_week": metrics,
         "goals_week_over_week": goal_rows,
+        "schedule_week_over_week": schedule.week_evidence(this_start, today,
+                                                          prev_start, prev_end),
         "workouts": {"this_week": week_workouts(this_start, today, keep_list=True),
                      "prev_week": week_workouts(prev_start, prev_end, keep_list=False)},
     }

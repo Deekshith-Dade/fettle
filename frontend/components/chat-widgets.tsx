@@ -540,6 +540,32 @@ function GoalsWidget() {
   );
 }
 
+/* ————— today's schedule ————— */
+
+const fmtTime12 = (t: string | null) => (t ? `${+t.slice(0, 2) % 12 || 12}:${t.slice(3)}` : "");
+
+function ScheduleWidget() {
+  const { data, err } = useCached("schedule", () => api.scheduleDay());
+  if (err) return <WErr msg="Couldn't load the schedule." />;
+  if (!data) return <Skel h={190} />;
+  return (
+    <div className="cw">
+      <Head title="Today's schedule" sub={`${data.done}/${data.total} kept`} />
+      <div className="cw-sched">
+        {data.items.map((x) => (
+          <div className="cw-sched-row" key={x.block_id ?? `e${x.id}`}>
+            <span className="t">{fmtTime12(x.time)}</span>
+            <span className="l">{x.label}</span>
+            <span className={`m ${x.done === true ? "done" : x.done === false ? "missed" : "open"}`}>
+              {x.done === true ? "✓" : x.done === false ? "✕" : "·"}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ————— dispatcher ————— */
 
 function num(v: unknown, lo: number, hi: number, dflt: number): number {
@@ -583,6 +609,8 @@ export function ChatWidget({ spec }: { spec: ChatWidgetSpec }) {
     }
     case "goals":
       return <GoalsWidget />;
+    case "schedule":
+      return <ScheduleWidget />;
     default:
       return <WErr msg={`This reply used a widget this build doesn't know ("${spec.kind}").`} />;
   }

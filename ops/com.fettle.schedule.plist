@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Daily-schedule reminders: runs `python cli.py remind` every quarter hour. The
+  command notifies for blocks starting in the next ~15 minutes that aren't already
+  marked done (and whose remind flag is on), deduped per block per day — so an
+  edited schedule needs no plist changes, and a kept day stays quiet.
+  Calendar times, not StartInterval, for the same reason as com.fettle.sync:
+  interval timers pause while the laptop sleeps.
+  Install:   cp ops/com.fettle.schedule.plist ~/Library/LaunchAgents/
+             launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.fettle.schedule.plist
+  Remove:    launchctl bootout gui/$(id -u)/com.fettle.schedule
+  Logs:      ~/Library/Logs/fettle-schedule.log
+  Run now:   launchctl kickstart gui/$(id -u)/com.fettle.schedule
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.fettle.schedule</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/deekshith/Documents/Projects/agents/claude-agents/fettle/backend/.venv/bin/python</string>
+        <string>cli.py</string>
+        <string>remind</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/deekshith/Documents/Projects/agents/claude-agents/fettle/backend</string>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+        <dict>
+            <key>Minute</key>
+            <integer>15</integer>
+        </dict>
+        <dict>
+            <key>Minute</key>
+            <integer>30</integer>
+        </dict>
+        <dict>
+            <key>Minute</key>
+            <integer>45</integer>
+        </dict>
+    </array>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/Users/deekshith/Library/Logs/fettle-schedule.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/deekshith/Library/Logs/fettle-schedule.log</string>
+</dict>
+</plist>

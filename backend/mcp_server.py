@@ -22,8 +22,8 @@ from enum import Enum
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app import (  # noqa: E402
-    benchmarks, coach, config, goals, insights, readiness, sleep_analysis, store,
-    vital_age,
+    benchmarks, coach, config, goals, insights, readiness, schedule, sleep_analysis,
+    store, vital_age,
 )
 from app.config import REGISTRY, REGISTRY_BY_NAME  # noqa: E402
 
@@ -225,6 +225,152 @@ def get_workouts(days: int = 30) -> list[dict]:
     return store.query_workouts(days=days, limit=100)
 
 
+# --- his daily schedule -----------------------------------------------------------
+
+@mcp.tool()
+def get_schedule(days: int = 7) -> dict:
+    """His daily schedule: the time-anchored blocks his day runs on (wake, focused
+    morning block, day work, gym, dinner, wind-down, bed) and the per-day log — each
+    block marked done/missed by him, with optional notes, plus any one-off items.
+
+    Returns the current template (block ids for log_block; each block's `days` is the
+    weekdays it recurs on, '0'=Mon…'6'=Sun — e.g. '01234' = weekdays only) and the last
+    `days` days, newest first, each with kept/total and per-item status (a day only
+    lists the blocks that occur that day). Call at the start of check-ins and retros;
+    misses are data to respond to, never shame. Also included per day: context chips
+    from synced data (training minutes, bed/wake times) — use them to inform the
+    conversation, but his own done-marks are the record."""
+    days = max(1, min(60, days))
+    out = []
+    for offset in range(days):
+        out.append(schedule.day_view(date.today() - timedelta(days=offset)))
+    return {"blocks": store.list_blocks(), "days": out}
+
+
+@mcp.tool()
+def log_block(block_id: int, done: bool = True, note: str = "", day: str = "") -> dict:
+    """Mark a schedule block done (or missed with done=false) and/or attach a note, for
+    today or a past `day` (ISO). Get block ids from get_schedule first. Call when he
+    tells you a block happened ('went to the gym', 'was in bed by 11') or slipped.
+    Confirm in one short line; if a day looks rough, look for the mechanism in the
+    surrounding blocks rather than moralizing."""
+    try:
+        d = date.fromisoformat(day) if day else date.today()
+    except ValueError:
+        return {"error": f"Invalid day '{day}' — use ISO YYYY-MM-DD or leave empty for today."}
+    try:
+        schedule.log(d, block_id=block_id, done=done, note=note or None)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    v = schedule.day_view(d)
+    return {"ok": True, "date": v["date"], "kept": v["done"], "total": v["total"]}
+
+
+class BlockColor(str, Enum):
+    neutral = "neutral"  # gray — anchors (wake, work, bed)
+    focus = "focus"      # indigo — focused practice/creative blocks
+    move = "move"        # green — training
+    food = "food"        # rust — meals
+    wind = "wind"        # amber — wind-down
+
+
+def _parse_day_arg(day: str, what: str = "day"):
+    if not day:
+        return date.today(), None
+    try:
+        return date.fromisoformat(day), None
+    except ValueError:
+        return None, {"error": f"Invalid {what} '{day}' — use ISO YYYY-MM-DD."}
+
+
+@mcp.tool()
+def get_schedule_month(month: str = "") -> dict:
+    """The month rollup (drill-up view): per-day kept/total, the month's overall kept %,
+    and per-block adherence over the days each block actually occurred. `month` is
+    'YYYY-MM'; empty = the current month. Use for 'how is the schedule going', weekly/
+    monthly reviews, and spotting which block keeps slipping."""
+    try:
+        y, m = (int(p) for p in (month or date.today().strftime("%Y-%m")).split("-"))
+        date(y, m, 1)
+    except (ValueError, TypeError):
+        return {"error": f"Invalid month '{month}' — use YYYY-MM."}
+    return schedule.month_view(y, m)
+
+
+@mcp.tool()
+def create_schedule_block(time: str, label: str, detail: str = "",
+                          color: BlockColor = BlockColor.neutral, remind: bool = True,
+                          days: str = "0123456", starts_on: str = "") -> dict:
+    """Add a recurring block to his schedule — only on his clear request. `time` is 24h
+    'HH:MM'; `days` = the weekday digits it repeats on ('0'=Mon…'6'=Sun: '01234'
+    weekdays, '56' weekends, '024' Mon/Wed/Fri); `starts_on` (ISO) defaults to today —
+    set it to a future date to schedule ahead ('from next Monday'). `remind`=false for
+    blocks that shouldn't nudge (reminders fire ~15 min before). After any schedule
+    change, call show_schedule and confirm in one line."""
+    try:
+        block = schedule.create_block(time, label, detail or None, color.value,
+                                      remind, days, starts_on or None)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    return {"ok": True, "block": block}
+
+
+@mcp.tool()
+def edit_schedule_block(block_id: int, time: str = "", label: str = "", detail: str = "",
+                        color: BlockColor | None = None, remind: bool | None = None,
+                        days: str = "", apply_from: str = "") -> dict:
+    """Change a block (get ids from get_schedule; only pass the fields to change).
+    The calendar-app rule: pass `apply_from` (ISO, usually today) so the change takes
+    effect from that day onward and PAST DAYS KEEP what he actually lived — this is
+    the right default for time/days changes. Leave `apply_from` empty only for
+    corrections that should rewrite the block everywhere (typo in a label)."""
+    fields = {"time": time or None, "label": label or None, "detail": detail or None,
+              "color": color.value if color else None, "remind": remind,
+              "days": days or None}
+    try:
+        if apply_from:
+            d, err = _parse_day_arg(apply_from, "apply_from")
+            if err:
+                return err
+            block = schedule.edit_block_from(block_id, d, **fields)
+        else:
+            block = schedule.edit_block(block_id, **fields)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    return {"ok": True, "block": block}
+
+
+@mcp.tool()
+def remove_schedule_block(block_id: int, from_day: str = "") -> dict:
+    """Remove a block from `from_day` (ISO, default today) onward. Nothing is deleted —
+    earlier days keep rendering it, so history stays truthful. Only on his clearly
+    stated intent ('drop the light session'); if at all ambiguous, ask one short
+    confirming question first. After removing, call show_schedule."""
+    d, err = _parse_day_arg(from_day, "from_day")
+    if err:
+        return err
+    try:
+        block = schedule.end_block(block_id, d)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    return {"ok": True, "removed_from": d.isoformat(), "block": block}
+
+
+@mcp.tool()
+def add_schedule_oneoff(time: str, label: str, day: str = "", detail: str = "") -> dict:
+    """Put a one-off item on a single day's timeline (default today) — appointments,
+    calls, errands ('dentist at 12:30 tomorrow'). It gets done/missed marking and
+    reminders like any block, but only exists on that day."""
+    d, err = _parse_day_arg(day)
+    if err:
+        return err
+    try:
+        entry = schedule.add_oneoff(d, time, label, detail or None)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    return {"ok": True, "entry": entry}
+
+
 # --- memory: durable facts he tells you in chat ---------------------------------
 
 class MemoryCategory(str, Enum):
@@ -424,6 +570,14 @@ def show_goals() -> str:
     """Show the user's active goals with live progress (adherence, streaks, status).
     Use when discussing goal progress."""
     return _shown("Goal progress overview")
+
+
+@mcp.tool()
+def show_schedule() -> str:
+    """Show today's schedule inline: the timeline of blocks with their done/missed
+    marks and kept count. Use whenever the daily schedule, routine, or consistency
+    is the topic."""
+    return _shown("Today's schedule timeline with its done marks")
 
 
 # Only metrics with a real sub-daily stream (heart-rate, SpO2 samples, HRV samples).

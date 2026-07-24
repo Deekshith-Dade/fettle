@@ -13,7 +13,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api, BenchmarksResponse, Briefing, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, Ring, RingsData, SetupStatus, SleepDetail, VitalAge, Workout, WorkoutDetail } from "@/lib/api";
+import { api, BenchmarksResponse, Briefing, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, ScheduleBlock, ScheduleColor, ScheduleDay, ScheduleItem, ScheduleMonth, Ring, RingsData, SetupStatus, SleepDetail, VitalAge, Workout, WorkoutDetail } from "@/lib/api";
 import { BenchmarksView, SleepView, SleepTeaser, StandingTeaser } from "@/components/insights-views";
 import { CommandPalette } from "@/components/command-palette";
 import { SetupWizard } from "@/components/setup-wizard";
@@ -1503,6 +1503,552 @@ function Drawer({
 
 /* ————— the dashboard ————— */
 
+/* ————— the daily schedule: timeline, calendar, editor ————— */
+
+const SCHED_COLORS: ScheduleColor[] = ["neutral", "focus", "move", "food", "wind"];
+
+const timeMin = (t: string | null) => (t ? +t.slice(0, 2) * 60 + +t.slice(3) : 24 * 60);
+const fmtTime12 = (t: string | null) => {
+  if (!t) return "";
+  const h = +t.slice(0, 2);
+  return `${h % 12 || 12}:${t.slice(3)}`;
+};
+const schedKey = (x: ScheduleItem) => (x.block_id != null ? `b${x.block_id}` : `e${x.id}`);
+
+function SchedRow({ item, expanded, onToggle, onLog, onDelete }: {
+  item: ScheduleItem;
+  expanded: boolean;
+  onToggle: () => void;
+  onLog: (fields: { done?: boolean; note?: string }) => Promise<void>;
+  onDelete: () => Promise<void>;
+}) {
+  const [note, setNote] = useState(item.note ?? "");
+  useEffect(() => setNote(item.note ?? ""), [item.note, expanded]);
+  const state = item.done === true ? " is-done" : item.done === false ? " is-missed" : "";
+  return (
+    <div className="sched-row">
+      <span className="sched-time">{fmtTime12(item.time)}</span>
+      <div className="sched-col">
+        <div
+          className={`sched-block sb-${item.color}${state}${expanded ? " open" : ""}`}
+          role="button" tabIndex={0} onClick={onToggle}
+          onKeyDown={(e) => e.key === "Enter" && onToggle()}
+        >
+          <div className="sched-block-main">
+            <div className="sched-label">
+              {item.label}
+              {item.oneoff && <i className="sched-tag">one-off</i>}
+            </div>
+            {item.detail && <div className="sched-detail">{item.detail}</div>}
+            {item.note && !expanded && <div className="sched-note-preview">✎ {item.note}</div>}
+          </div>
+          <button
+            className={`sched-mark${state}`}
+            aria-label={item.done === true ? "Mark missed" : "Mark done"}
+            onClick={(e) => { e.stopPropagation(); onLog({ done: item.done !== true }); }}
+          >
+            {item.done === true ? "✓" : item.done === false ? "✕" : ""}
+          </button>
+        </div>
+        {expanded && (
+          <div className="sched-expand">
+            <div className="gf-cmp">
+              <button className={item.done === true ? "on" : ""} onClick={() => onLog({ done: true })}>done</button>
+              <button className={item.done === false ? "on" : ""} onClick={() => onLog({ done: false })}>missed</button>
+            </div>
+            <input
+              className="sched-input" value={note} placeholder="Add a note for this block…"
+              onChange={(e) => setNote(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && onLog({ note })}
+            />
+            <button className="btn" disabled={note === (item.note ?? "")} onClick={() => onLog({ note })}>Save note</button>
+            {item.oneoff && <button className="btn sched-del" onClick={onDelete}>Remove</button>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
+const DAY_PRESETS: { label: string; mask: string }[] = [
+  { label: "Every day", mask: "0123456" },
+  { label: "Weekdays", mask: "01234" },
+  { label: "Weekends", mask: "56" },
+];
+
+function fmtDaysMask(days: string): string {
+  const preset = DAY_PRESETS.find((p) => p.mask === days);
+  if (preset) return preset.label;
+  return days.split("").map((c) => DAY_NAMES[+c]).join(" · ");
+}
+
+function SchedBlockForm({ initial, viewDay, onDone, onCancel, onRemove }: {
+  initial: ScheduleBlock | null;
+  viewDay: string; // the day being viewed — anchor for "from this day" edits/removal
+  onDone: (
+    body: { time: string; label: string; detail?: string; color: ScheduleColor; remind: boolean; days: string; starts_on?: string },
+    applyFrom?: string
+  ) => Promise<void>;
+  onCancel: () => void;
+  onRemove?: () => Promise<void>;
+}) {
+  const [time, setTime] = useState(initial?.time ?? "12:00");
+  const [label, setLabel] = useState(initial?.label ?? "");
+  const [detail, setDetail] = useState(initial?.detail ?? "");
+  const [color, setColor] = useState<ScheduleColor>(initial?.color ?? "neutral");
+  const [remind, setRemind] = useState(initial ? !!initial.remind : true);
+  const [days, setDays] = useState(initial?.days ?? "0123456");
+  const [starts, setStarts] = useState(viewDay);
+  const [applyMode, setApplyMode] = useState<"all" | "from">("all");
+  const [busy, setBusy] = useState(false);
+  const viewIsToday = viewDay === localToday();
+
+  function toggleDay(i: number) {
+    const s = String(i);
+    setDays((d) => (d.includes(s) ? d.split("").filter((c) => c !== s).join("") : [...d, s].sort().join("")));
+  }
+  async function save() {
+    if (!label.trim() || !time || !days) return;
+    setBusy(true);
+    try {
+      await onDone(
+        {
+          time, label: label.trim(), detail: detail.trim() || undefined, color, remind, days,
+          ...(initial ? {} : { starts_on: starts || viewDay }),
+        },
+        initial && applyMode === "from" ? viewDay : undefined
+      );
+    } finally { setBusy(false); }
+  }
+  return (
+    <div className="sched-bform">
+      <div className="sbf-row">
+        <input type="time" className="sched-input sched-time-input" value={time} onChange={(e) => setTime(e.target.value)} />
+        <input className="sched-input sched-label-input" placeholder="Label" value={label}
+          onChange={(e) => setLabel(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
+        <input className="sched-input sched-detail-input" placeholder="Detail (optional)" value={detail}
+          onChange={(e) => setDetail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
+      </div>
+      <div className="sbf-row">
+        <div className="sched-daychips" role="group" aria-label="Repeats on">
+          {DAY_LETTERS.map((letter, i) => (
+            <button key={i} type="button" title={DAY_NAMES[i]}
+              className={`sched-daychip${days.includes(String(i)) ? " on" : ""}`}
+              onClick={() => toggleDay(i)}>
+              {letter}
+            </button>
+          ))}
+        </div>
+        <div className="sched-presets">
+          {DAY_PRESETS.map((p) => (
+            <button key={p.mask} type="button" className={days === p.mask ? "on" : ""}
+              onClick={() => setDays(p.mask)}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {!days && <span className="sched-days-warn">pick at least one day</span>}
+      </div>
+      <div className="sbf-row">
+        <div className="sched-swatches" role="radiogroup" aria-label="Color">
+          {SCHED_COLORS.map((c) => (
+            <button key={c} type="button" className={`sched-swatch sb-${c}${color === c ? " on" : ""}`}
+              title={c} aria-label={c} onClick={() => setColor(c)} />
+          ))}
+        </div>
+        <label className="sched-remind-toggle">
+          <input type="checkbox" checked={remind} onChange={(e) => setRemind(e.target.checked)} /> remind
+        </label>
+        {!initial ? (
+          <label className="sched-starts">
+            <span className="gf-k">starts</span>
+            <input type="date" className="sched-input sched-date-input" value={starts}
+              onChange={(e) => setStarts(e.target.value)} />
+          </label>
+        ) : (
+          <div className="sched-applymode">
+            <span className="gf-k">apply</span>
+            <div className="gf-cmp">
+              <button type="button" className={applyMode === "all" ? "on" : ""} onClick={() => setApplyMode("all")}>everywhere</button>
+              <button type="button" className={applyMode === "from" ? "on" : ""} onClick={() => setApplyMode("from")}>
+                from {viewIsToday ? "today" : fmtDay(viewDay)}
+              </button>
+            </div>
+          </div>
+        )}
+        <div className="sched-actions">
+          <button className="btn btn-lime" disabled={busy || !label.trim() || !days} onClick={save}>
+            {busy ? "Saving…" : initial ? "Save" : "Add block"}
+          </button>
+          {onRemove && (
+            <button className="btn sched-del" onClick={onRemove}>
+              Remove from {viewIsToday ? "today" : fmtDay(viewDay)}
+            </button>
+          )}
+          <button className="btn" onClick={onCancel}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SchedMonthGrid({ month, onPick }: { month: ScheduleMonth; onPick: (iso: string) => void }) {
+  const lead = (new Date(month.month + "-01T12:00:00").getDay() + 6) % 7; // Monday-start
+  const today = localToday();
+  return (
+    <div className="sched-cal">
+      <div className="sched-cal-head" aria-hidden>
+        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => <span key={d}>{d}</span>)}
+      </div>
+      <div className="sched-cal-grid">
+        {Array.from({ length: lead }).map((_, i) => <span key={`lead${i}`} className="sched-cell empty" />)}
+        {month.days.map((d) => (
+          <button
+            key={d.date}
+            className={`sched-cell${d.future ? " future" : ""}${d.date === today ? " today" : ""}`}
+            onClick={() => onPick(d.date)} disabled={d.future}
+            title={d.future ? undefined : `${d.done}/${d.total} kept`}
+          >
+            <span className="sc-n">{+d.date.slice(8)}</span>
+            {!d.future && d.total > 0 && (
+              <span className="sc-bar"><span style={{ width: `${Math.round((d.done / d.total) * 100)}%` }} /></span>
+            )}
+            {!d.future && <span className="sc-count">{d.done}/{d.total}</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function urlB64ToU8(b64: string): Uint8Array {
+  const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+
+/** Web-push opt-in for this device. Each browser/device subscribes itself; the
+ * quarter-hour reminder job then reaches it wherever it is. */
+function PushReminders() {
+  const [state, setState] = useState<"busy" | "insecure" | "ios-install" | "unsupported" | "denied" | "off" | "on">("busy");
+  const [flash, setFlash] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+      if (!window.isSecureContext) return setState("insecure");
+      if (!("serviceWorker" in navigator) || !("PushManager" in window))
+        return setState(isIOS ? "ios-install" : "unsupported");
+      if (Notification.permission === "denied") return setState("denied");
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg ? await reg.pushManager.getSubscription() : null;
+      setState(sub ? "on" : "off");
+    })().catch(() => setState("unsupported"));
+  }, []);
+
+  async function enable() {
+    setState("busy");
+    try {
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") return setState(perm === "denied" ? "denied" : "off");
+      const { key } = await api.pushKey();
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlB64ToU8(key).buffer as ArrayBuffer,
+      });
+      await api.pushSubscribe(sub.toJSON());
+      await api.pushTest();
+      setState("on");
+    } catch {
+      setState("off");
+      setFlash("Couldn't subscribe — try again.");
+    }
+  }
+  async function disable() {
+    setState("busy");
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg ? await reg.pushManager.getSubscription() : null;
+      if (sub) {
+        await api.pushUnsubscribe(sub.endpoint);
+        await sub.unsubscribe();
+      }
+      setState("off");
+    } catch { setState("on"); }
+  }
+  async function test() {
+    const r = await api.pushTest().catch(() => null);
+    setFlash(r && r.delivered > 0 ? `Test sent to ${r.delivered} device${r.delivered > 1 ? "s" : ""}.` : "Test failed.");
+    setTimeout(() => setFlash(null), 4000);
+  }
+
+  return (
+    <div className="sched-push">
+      {state === "busy" && <span className="muted">…</span>}
+      {state === "insecure" && (
+        <span className="muted">Notifications on this device need the HTTPS address — open fettle via its Tailscale https link, then enable here.</span>
+      )}
+      {state === "ios-install" && (
+        <span className="muted">iPhone: open the HTTPS address in Safari → Share → <strong>Add to Home Screen</strong> → open it from there, then enable notifications here.</span>
+      )}
+      {state === "unsupported" && <span className="muted">This browser doesn&apos;t support web push.</span>}
+      {state === "denied" && <span className="muted">Notifications are blocked for fettle in this device&apos;s settings.</span>}
+      {state === "off" && (
+        <button className="btn" onClick={enable}>Enable reminders on this device</button>
+      )}
+      {state === "on" && (
+        <>
+          <span className="sched-push-on">✓ Reminders reach this device</span>
+          <button className="btn btn-mini" onClick={test}>Test</button>
+          <button className="btn btn-mini" onClick={disable}>Turn off</button>
+        </>
+      )}
+      {flash && <span className="muted">{flash}</span>}
+    </div>
+  );
+}
+
+function ScheduleView({ onChanged }: { onChanged: () => void }) {
+  const [mode, setMode] = useState<"day" | "month">("day");
+  const [dateISO, setDateISO] = useState(localToday());
+  const [day, setDay] = useState<ScheduleDay | null>(null);
+  const [monthISO, setMonthISO] = useState(localToday().slice(0, 7));
+  const [month, setMonth] = useState<ScheduleMonth | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [blocks, setBlocks] = useState<ScheduleBlock[] | null>(null);
+  const [editBlock, setEditBlock] = useState<number | "new" | null>(null);
+  const [addingItem, setAddingItem] = useState(false);
+  const [itemTime, setItemTime] = useState("12:00");
+  const [itemLabel, setItemLabel] = useState("");
+
+  useEffect(() => { api.scheduleDay(dateISO).then(setDay).catch(() => {}); }, [dateISO]);
+  useEffect(() => {
+    if (mode === "month") api.scheduleMonth(monthISO).then(setMonth).catch(() => {});
+  }, [mode, monthISO]);
+  useEffect(() => {
+    if (editing) api.scheduleBlocks().then((b) => setBlocks(b.blocks)).catch(() => {});
+  }, [editing]);
+
+  async function refresh() {
+    api.scheduleDay(dateISO).then(setDay).catch(() => {});
+    if (mode === "month") api.scheduleMonth(monthISO).then(setMonth).catch(() => {});
+    if (editing) api.scheduleBlocks().then((b) => setBlocks(b.blocks)).catch(() => {});
+    onChanged();
+  }
+  async function logItem(item: ScheduleItem, fields: { done?: boolean; note?: string }) {
+    await api.scheduleLog({
+      day: dateISO,
+      ...(item.block_id != null ? { block_id: item.block_id } : { entry_id: item.id ?? undefined }),
+      ...fields,
+    });
+    await refresh();
+  }
+  async function addOneoff() {
+    if (!itemLabel.trim()) return;
+    await api.scheduleOneoff({ day: dateISO, time: itemTime, label: itemLabel.trim() });
+    setItemLabel(""); setAddingItem(false);
+    await refresh();
+  }
+  function shiftDay(delta: number) {
+    const d = new Date(dateISO + "T12:00:00");
+    d.setDate(d.getDate() + delta);
+    setDateISO(d.toLocaleDateString("en-CA"));
+    setExpanded(null);
+  }
+  function shiftMonth(delta: number) {
+    const [y, m] = monthISO.split("-").map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    setMonthISO(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+  const monthLabel = new Date(monthISO + "-01T12:00:00")
+    .toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const isToday = dateISO === localToday();
+
+  return (
+    <section className="section rise">
+      <div className="sched-top">
+        <p className="eyebrow">The day, by design</p>
+        <div className="gf-cmp sched-mode">
+          <button className={mode === "day" ? "on" : ""} onClick={() => setMode("day")}>Day</button>
+          <button className={mode === "month" ? "on" : ""} onClick={() => setMode("month")}>Month</button>
+        </div>
+      </div>
+
+      {mode === "day" && (
+        <>
+          <div className="sched-nav">
+            <button className="btn sched-nav-btn" onClick={() => shiftDay(-1)} aria-label="Previous day">‹</button>
+            <div className="sched-nav-label">
+              <strong>{isToday ? "Today" : fmtDayLong(dateISO)}</strong>
+              {day && <span className="sched-kept">{day.done}/{day.total} kept</span>}
+            </div>
+            <button className="btn sched-nav-btn" onClick={() => shiftDay(1)} aria-label="Next day">›</button>
+            {!isToday && <button className="btn" onClick={() => { setDateISO(localToday()); setExpanded(null); }}>Today</button>}
+            <div className="sched-tools">
+              <button className="btn" onClick={() => setAddingItem((v) => !v)}>+ Add item</button>
+              <button className={`btn${editing ? " sched-editing-btn" : ""}`} onClick={() => { setEditing((v) => !v); setEditBlock(null); }}>
+                {editing ? "Done editing" : "Edit schedule"}
+              </button>
+            </div>
+          </div>
+
+          {day && (day.context.trained || day.context.bed) && (
+            <div className="sched-chips">
+              {day.context.trained && <span className="sched-chip">synced · trained {day.context.trained}</span>}
+              {day.context.bed && day.context.wake && (
+                <span className="sched-chip">synced · in bed {day.context.bed} → up {day.context.wake}</span>
+              )}
+            </div>
+          )}
+
+          {addingItem && (
+            <div className="sched-bform sched-oneoff-form">
+              <input type="time" className="sched-input sched-time-input" value={itemTime} onChange={(e) => setItemTime(e.target.value)} />
+              <input className="sched-input sched-label-input" autoFocus placeholder={`One-off for ${isToday ? "today" : fmtDay(dateISO)} — e.g. Dentist`}
+                value={itemLabel} onChange={(e) => setItemLabel(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addOneoff()} />
+              <div className="sched-actions">
+                <button className="btn btn-lime" disabled={!itemLabel.trim()} onClick={addOneoff}>Add</button>
+                <button className="btn" onClick={() => setAddingItem(false)}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {editing ? (
+            <div className="sched-editor">
+              {(blocks ?? []).map((b) =>
+                editBlock === b.id ? (
+                  <SchedBlockForm
+                    key={b.id} initial={b} viewDay={dateISO}
+                    onDone={async (body, applyFrom) => {
+                      await api.schedulePatchBlock(b.id, applyFrom ? { ...body, apply_from: applyFrom } : body);
+                      setEditBlock(null); await refresh();
+                    }}
+                    onCancel={() => setEditBlock(null)}
+                    onRemove={async () => { await api.scheduleRemoveBlock(b.id, dateISO); setEditBlock(null); await refresh(); }}
+                  />
+                ) : (
+                  <button key={b.id} className={`sched-edit-row sb-${b.color}`} onClick={() => setEditBlock(b.id)}>
+                    <span className="sched-time">{fmtTime12(b.time)}</span>
+                    <span className="sched-edit-label">{b.label}</span>
+                    <i className="sched-tag">{fmtDaysMask(b.days)}</i>
+                    {b.starts_on > localToday() && <i className="sched-tag">from {fmtDay(b.starts_on)}</i>}
+                    {b.ends_on && <i className="sched-tag">until {fmtDay(b.ends_on)}</i>}
+                    {!b.remind && <i className="sched-tag">no reminder</i>}
+                    <span className="sched-edit-pencil"><Glyph name="Edit" /></span>
+                  </button>
+                )
+              )}
+              {editBlock === "new" ? (
+                <SchedBlockForm
+                  initial={null} viewDay={dateISO}
+                  onDone={async (body) => { await api.scheduleCreateBlock(body); setEditBlock(null); await refresh(); }}
+                  onCancel={() => setEditBlock(null)}
+                />
+              ) : (
+                <button className="btn sched-add-block" onClick={() => setEditBlock("new")}>+ Add block</button>
+              )}
+              <p className="muted sched-edit-note">
+                Blocks repeat on their picked weekdays. Saving with “from {dateISO === localToday() ? "today" : fmtDay(dateISO)}” keeps earlier days as they were (navigate to a day to change from there); “Remove” ends a block from the viewed day without touching the past. Reminders fire ~15 min before a block.
+              </p>
+            </div>
+          ) : (
+            <div className="sched-timeline">
+              {day?.items.map((item) => (
+                <SchedRow
+                  key={schedKey(item)} item={item}
+                  expanded={expanded === schedKey(item)}
+                  onToggle={() => setExpanded(expanded === schedKey(item) ? null : schedKey(item))}
+                  onLog={(fields) => logItem(item, fields)}
+                  onDelete={async () => { if (item.id != null) { await api.scheduleDeleteEntry(item.id); setExpanded(null); await refresh(); } }}
+                />
+              ))}
+              {day && !day.items.length && <p className="muted">No blocks — add some with “Edit schedule”.</p>}
+            </div>
+          )}
+        </>
+      )}
+
+      {mode === "month" && (
+        <>
+          <div className="sched-nav">
+            <button className="btn sched-nav-btn" onClick={() => shiftMonth(-1)} aria-label="Previous month">‹</button>
+            <div className="sched-nav-label">
+              <strong>{monthLabel}</strong>
+              {month && month.of > 0 && <span className="sched-kept">{month.pct}% kept · {month.kept}/{month.of}</span>}
+            </div>
+            <button className="btn sched-nav-btn" onClick={() => shiftMonth(1)} aria-label="Next month">›</button>
+          </div>
+          {month ? (
+            <>
+              <SchedMonthGrid month={month} onPick={(iso) => { setDateISO(iso); setMode("day"); }} />
+              {month.block_stats.length > 0 && (
+                <div className="sched-bstats">
+                  {month.block_stats.map((s) => (
+                    <div key={s.block_id} className="sched-bstat">
+                      <span className={`sched-dot sb-${s.color} filled`} aria-hidden />
+                      <span className="sched-bstat-label">{s.label}</span>
+                      <span className="sched-bstat-track"><span className={`sb-${s.color}`} style={{ width: `${s.pct}%` }} /></span>
+                      <span className="sched-bstat-pct">{s.done}/{s.days} · {s.pct}%</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="muted">Loading…</p>
+          )}
+        </>
+      )}
+
+      <PushReminders />
+    </section>
+  );
+}
+
+function ScheduleCard({ data, onGo }: { data: ScheduleDay; onGo: () => void }) {
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const next = data.items.find((x) => x.done == null && x.time != null && timeMin(x.time) >= nowMin)
+    ?? data.items.find((x) => x.done == null);
+  return (
+    <section className="section rise" style={{ animationDelay: "60ms" }}>
+      <button className="sched-card" onClick={onGo}>
+        <div className="sched-card-main">
+          <p className="eyebrow">Today&apos;s schedule</p>
+          <div className="sched-card-next">
+            {next ? (
+              <>
+                <span className="sched-card-time">{fmtTime12(next.time)}</span>
+                <span className="sched-card-label">{next.label}</span>
+              </>
+            ) : (
+              <span className="sched-card-label">All blocks logged — day closed.</span>
+            )}
+          </div>
+          <div className="sched-card-dots" aria-hidden>
+            {data.items.map((x) => (
+              <span
+                key={schedKey(x)}
+                className={`sched-dot sb-${x.color}${x.done === true ? " filled" : x.done === false ? " missed" : ""}`}
+                title={`${fmtTime12(x.time)} ${x.label}`}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="sched-card-count">
+          <span className="sched-count-n">{data.done}</span>
+          <span className="sched-count-k">of {data.total} kept</span>
+        </div>
+      </button>
+    </section>
+  );
+}
+
 export default function Dashboard() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [setup, setSetup] = useState<SetupStatus | null>(null);
@@ -1535,6 +2081,7 @@ export default function Dashboard() {
   const [sleepDetail, setSleepDetail] = useState<SleepDetail | null>(null);
   const [vitalAge, setVitalAge] = useState<VitalAge | null>(null);
   const [rings, setRings] = useState<RingsData | null>(null);
+  const [todaySched, setTodaySched] = useState<ScheduleDay | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function loadGoals() {
@@ -1558,7 +2105,7 @@ export default function Dashboard() {
   // has no reload gesture).
   const lastLoadedAt = useRef(0);
   async function loadData() {
-    const [dts, bulk, r, ins, rec, bm, sd, va, rg] = await Promise.all([
+    const [dts, bulk, r, ins, rec, bm, sd, va, rg, rp] = await Promise.all([
       api.dataTypes(),
       api.dailyBulk(),
       api.readiness().catch(() => null),
@@ -1568,6 +2115,7 @@ export default function Dashboard() {
       api.sleepDetail().catch(() => null),
       api.vitalAge().catch(() => null),
       api.rings().catch(() => null),
+      api.scheduleDay().catch(() => null),
     ]);
     setTypes(dts);
     setDailyCache(bulk.series);
@@ -1578,6 +2126,7 @@ export default function Dashboard() {
     setSleepDetail(sd);
     setVitalAge(va);
     setRings(rg);
+    setTodaySched(rp);
     loadGoals();
     refreshSyncMeta();
     lastLoadedAt.current = Date.now();
@@ -1798,6 +2347,7 @@ export default function Dashboard() {
   // noticed → domain deep-dives → the raw catalog. Coach renders after these, last.
   const tabs = [
     { id: "overview", label: "Overview" },
+    ...(todaySched ? [{ id: "schedule", label: "Schedule" }] : []),
     { id: "goals", label: "Goals" },
     ...(insights.length ? [{ id: "insights", label: "Insights" }] : []),
     ...(sleepDetail ? [{ id: "sleep", label: "Sleep" }] : []),
@@ -1805,6 +2355,10 @@ export default function Dashboard() {
     ...(benchmarks ? [{ id: "standing", label: "Standing" }] : []),
     { id: "metrics", label: "Metrics" },
   ];
+
+  function reloadTodaySched() {
+    api.scheduleDay().then(setTodaySched).catch(() => {});
+  }
 
   async function addGoal(data_type: string, comparator: "gte" | "lte", target: number) {
     await api.createGoal({ data_type, comparator, target });
@@ -1824,6 +2378,7 @@ export default function Dashboard() {
     setView(v);
     requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
   }
+
 
   // Theme: 'system' follows the OS; 'light'/'dark' pin it. The <head> script sets the initial
   // data-theme before paint; here we mirror the saved choice and react to OS changes.
@@ -2099,6 +2654,11 @@ export default function Dashboard() {
             </section>
           )}
 
+          {/* ———— OVERVIEW · today's schedule ———— */}
+          {view === "overview" && todaySched && (
+            <ScheduleCard data={todaySched} onGo={() => go("schedule")} />
+          )}
+
           {/* ———— OVERVIEW · vital age ———— */}
           {view === "overview" && vitalAge && (
             <VitalAgeCard data={vitalAge} onOpenSleep={() => setOpen("sleep-duration")} />
@@ -2148,6 +2708,9 @@ export default function Dashboard() {
               )}
             </>
           )}
+
+          {/* ———— SCHEDULE ———— */}
+          {view === "schedule" && <ScheduleView onChanged={reloadTodaySched} />}
 
           {/* ———— GOALS ———— */}
           {view === "goals" && (

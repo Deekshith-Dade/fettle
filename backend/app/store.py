@@ -85,6 +85,72 @@ CREATE TABLE IF NOT EXISTS workout_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_workouts_day ON workout_sessions (day);
+
+-- Individual sleep sessions with their clock times. The sleep-* daily metrics keep only
+-- durations; the rep tracker needs *when* — did the night start by the bed anchor and
+-- end by the wake anchor.
+CREATE TABLE IF NOT EXISTS sleep_sessions (
+    id           TEXT PRIMARY KEY,    -- API dataPoint name (stable across syncs)
+    day          TEXT NOT NULL,       -- local civil date of the wake (Fitbit dates sleep to wake day)
+    start_ts     TEXT NOT NULL,       -- UTC
+    start_local  TEXT NOT NULL,       -- naive local ISO (bed time)
+    end_ts       TEXT,
+    end_local    TEXT,                -- naive local ISO (wake time)
+    duration_min REAL,                -- time asleep (falls back to in-bed span)
+    raw          TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sleep_sessions_day ON sleep_sessions (day);
+
+-- The daily schedule template: time-anchored blocks each day is lived (and scored)
+-- against. A block recurs on its `days` (weekday digits, Mon=0…Sun=6) inside its
+-- [starts_on, ends_on] window; ending a block instead of deleting it keeps past
+-- days rendering exactly as they were lived — the calendar-app edit model.
+CREATE TABLE IF NOT EXISTS schedule_blocks (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    time       TEXT NOT NULL,               -- "HH:MM", local
+    label      TEXT NOT NULL,
+    detail     TEXT,
+    color      TEXT NOT NULL DEFAULT 'neutral',  -- neutral|focus|move|food|wind
+    remind     INTEGER NOT NULL DEFAULT 1,  -- send the pre-block nudge for this one
+    active     INTEGER NOT NULL DEFAULT 1,  -- legacy; ends_on is the removal mechanism
+    days       TEXT NOT NULL DEFAULT '0123456',  -- weekdays it applies to (Mon=0…Sun=6)
+    starts_on  TEXT,                        -- ISO date the block takes effect
+    ends_on    TEXT,                        -- ISO date it last applies (NULL = open)
+    created_at TEXT NOT NULL,
+    updated_at TEXT
+);
+
+-- Per-day log: a row appears when a block gets touched (done/missed/note), plus
+-- one-off items added to a single day (block_id NULL, carrying their own time/label).
+CREATE TABLE IF NOT EXISTS schedule_entries (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    day        TEXT NOT NULL,
+    block_id   INTEGER,
+    time       TEXT,
+    label      TEXT,
+    detail     TEXT,
+    done       INTEGER,                     -- 1 done, 0 missed, NULL unlogged
+    note       TEXT,
+    updated_at TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sched_day_block
+    ON schedule_entries (day, block_id) WHERE block_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_sched_day ON schedule_entries (day);
+
+-- Web-push subscriptions (his phone / other browsers). One row per endpoint;
+-- pruned automatically when the push service reports the subscription gone.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint     TEXT PRIMARY KEY,
+    subscription TEXT NOT NULL,     -- full subscription JSON (keys incl.)
+    created_at   TEXT NOT NULL,
+    last_ok      TEXT
+);
+
+-- v2 of the accountability feature: the rep_days prototype was replaced by the
+-- schedule tables above before it ever held data.
+DROP TABLE IF EXISTS rep_days;
 """
 
 
@@ -93,6 +159,16 @@ def init_db(path: Path | None = None) -> None:
         # WAL lets the dashboard keep reading while a (possibly scheduled) sync writes.
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA)
+        # v2 of schedule_blocks: recurrence (days) + effect window (starts_on/ends_on).
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(schedule_blocks)").fetchall()]
+        if "days" not in cols:
+            conn.execute("ALTER TABLE schedule_blocks ADD COLUMN days TEXT NOT NULL DEFAULT '0123456'")
+            conn.execute("ALTER TABLE schedule_blocks ADD COLUMN starts_on TEXT")
+            conn.execute("ALTER TABLE schedule_blocks ADD COLUMN ends_on TEXT")
+            conn.execute("UPDATE schedule_blocks SET starts_on=created_at WHERE starts_on IS NULL")
+            # Anything archived under the old model reads as ended the day it was made.
+            conn.execute("UPDATE schedule_blocks SET ends_on=created_at "
+                         "WHERE active=0 AND ends_on IS NULL")
 
 
 @contextmanager
@@ -505,6 +581,195 @@ def query_workouts(days: int | None = 90, limit: int = 200) -> list[dict]:
     params.append(limit)
     with _connect() as conn:
         return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+# --- sleep sessions -----------------------------------------------------------
+
+def upsert_sleep_sessions(sessions: list[dict[str, Any]]) -> int:
+    """Idempotently store parsed sleep sessions (keyed by the API point name)."""
+    if not sessions:
+        return 0
+    with _connect() as conn:
+        conn.executemany(
+            "INSERT INTO sleep_sessions (id, day, start_ts, start_local, end_ts, end_local, "
+            "duration_min, raw) "
+            "VALUES (:id, :day, :start_ts, :start_local, :end_ts, :end_local, "
+            ":duration_min, :raw) "
+            "ON CONFLICT(id) DO UPDATE SET day=excluded.day, start_ts=excluded.start_ts, "
+            "start_local=excluded.start_local, end_ts=excluded.end_ts, "
+            "end_local=excluded.end_local, duration_min=excluded.duration_min, "
+            "raw=excluded.raw",
+            sessions,
+        )
+    return len(sessions)
+
+
+def query_sleep_sessions(start_day: str | None = None, end_day: str | None = None) -> list[dict]:
+    """Sessions whose wake falls in [start_day, end_day], oldest first."""
+    sql = ("SELECT id, day, start_ts, start_local, end_ts, end_local, duration_min "
+           "FROM sleep_sessions")
+    where, params = [], []
+    if start_day:
+        where.append("day >= ?"); params.append(start_day)
+    if end_day:
+        where.append("day <= ?"); params.append(end_day)
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY day, start_ts"
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+# --- the daily schedule --------------------------------------------------------
+
+_BLOCK_FIELDS = ("time", "label", "detail", "color", "remind", "active",
+                 "days", "starts_on", "ends_on")
+_ENTRY_FIELDS = ("time", "label", "detail", "done", "note")
+
+
+def list_blocks(include_ended: bool = False) -> list[dict]:
+    """Blocks ordered by time. Default: only current-and-upcoming (not yet ended);
+    include_ended adds everything, for rendering past days as they were."""
+    with _connect() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM schedule_blocks ORDER BY time, id").fetchall()]
+    if include_ended:
+        return rows
+    today = date.today().isoformat()
+    return [r for r in rows if not r["ends_on"] or r["ends_on"] >= today]
+
+
+def get_block(block_id: int) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM schedule_blocks WHERE id=?", (block_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def count_blocks() -> int:
+    """All blocks ever created (archived included) — the seed-once check."""
+    with _connect() as conn:
+        return conn.execute("SELECT COUNT(*) FROM schedule_blocks").fetchone()[0]
+
+
+def add_block(time: str, label: str, detail: str | None = None,
+              color: str = "neutral", remind: int = 1,
+              days: str = "0123456", starts_on: str | None = None) -> dict:
+    today = date.today().isoformat()
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO schedule_blocks (time, label, detail, color, remind, days, "
+            "starts_on, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (time, label, detail, color, remind, days, starts_on or today, today),
+        )
+        bid = int(cur.lastrowid)
+    return get_block(bid) or {}
+
+
+def update_block(block_id: int, **fields: Any) -> dict | None:
+    sets = {k: v for k, v in fields.items() if k in _BLOCK_FIELDS and v is not None}
+    if sets:
+        sets["updated_at"] = datetime.now(timezone.utc).isoformat()
+        assign = ", ".join(f"{k}=?" for k in sets)
+        with _connect() as conn:
+            conn.execute(f"UPDATE schedule_blocks SET {assign} WHERE id=?",
+                         (*sets.values(), block_id))
+    return get_block(block_id)
+
+
+def entries_between(start_day: str, end_day: str) -> list[dict]:
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM schedule_entries WHERE day >= ? AND day <= ? ORDER BY day, id",
+            (start_day, end_day),
+        ).fetchall()]
+
+
+def get_entry(entry_id: int) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM schedule_entries WHERE id=?", (entry_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def upsert_block_entry(day: str, block_id: int, **fields: Any) -> dict:
+    """The (day, block) log row — created on first touch, partially updated after."""
+    sets = {k: v for k, v in fields.items() if k in _ENTRY_FIELDS}
+    sets["updated_at"] = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM schedule_entries WHERE day=? AND block_id=?", (day, block_id)
+        ).fetchone()
+        if row:
+            assign = ", ".join(f"{k}=?" for k in sets)
+            conn.execute(f"UPDATE schedule_entries SET {assign} WHERE id=?",
+                         (*sets.values(), row["id"]))
+            eid = int(row["id"])
+        else:
+            cols = ", ".join(sets)
+            marks = ", ".join("?" for _ in sets)
+            cur = conn.execute(
+                f"INSERT INTO schedule_entries (day, block_id, {cols}) VALUES (?, ?, {marks})",
+                (day, block_id, *sets.values()),
+            )
+            eid = int(cur.lastrowid)
+    return get_entry(eid) or {}
+
+
+def add_oneoff_entry(day: str, time: str, label: str, detail: str | None = None) -> dict:
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO schedule_entries (day, block_id, time, label, detail, updated_at) "
+            "VALUES (?, NULL, ?, ?, ?, ?)",
+            (day, time, label, detail, datetime.now(timezone.utc).isoformat()),
+        )
+        eid = int(cur.lastrowid)
+    return get_entry(eid) or {}
+
+
+def update_entry(entry_id: int, **fields: Any) -> dict | None:
+    sets = {k: v for k, v in fields.items() if k in _ENTRY_FIELDS}
+    if sets:
+        sets["updated_at"] = datetime.now(timezone.utc).isoformat()
+        assign = ", ".join(f"{k}=?" for k in sets)
+        with _connect() as conn:
+            conn.execute(f"UPDATE schedule_entries SET {assign} WHERE id=?",
+                         (*sets.values(), entry_id))
+    return get_entry(entry_id)
+
+
+def delete_entry(entry_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM schedule_entries WHERE id=?", (entry_id,))
+
+
+# --- web-push subscriptions ----------------------------------------------------
+
+def add_push_subscription(endpoint: str, subscription_json: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO push_subscriptions (endpoint, subscription, created_at) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(endpoint) DO UPDATE SET subscription=excluded.subscription",
+            (endpoint, subscription_json, datetime.now(timezone.utc).isoformat()),
+        )
+
+
+def list_push_subscriptions() -> list[dict]:
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT endpoint, subscription, created_at, last_ok FROM push_subscriptions"
+        ).fetchall()]
+
+
+def touch_push_subscription(endpoint: str) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE push_subscriptions SET last_ok=? WHERE endpoint=?",
+                     (datetime.now(timezone.utc).isoformat(), endpoint))
+
+
+def delete_push_subscription(endpoint: str) -> bool:
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM push_subscriptions WHERE endpoint=?", (endpoint,))
+        return cur.rowcount > 0
 
 
 # --- coach memory -------------------------------------------------------------

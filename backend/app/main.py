@@ -10,19 +10,21 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 from . import (
-    auth, benchmarks, briefing, chat, coach, config, goals, insights, readiness,
-    sleep_analysis, store, strain, sync, vital_age, workouts,
+    auth, benchmarks, briefing, chat, coach, config, goals, insights, push, readiness,
+    schedule, sleep_analysis, store, strain, sync, vital_age, workouts,
 )
 from .config import REGISTRY, REGISTRY_BY_NAME, settings
 
 # Ensure the schema exists as soon as the module is imported (covers TestClient,
 # workers, and any code path that touches the DB before a request arrives).
 store.init_db()
+schedule.ensure_seed()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     store.init_db()
+    schedule.ensure_seed()
     yield
 
 
@@ -270,6 +272,182 @@ def vital_age_endpoint() -> dict:
     if data is None:
         raise HTTPException(404, "Not enough data to compute Vital Age yet.")
     return data
+
+
+# --- the daily schedule --------------------------------------------------------
+
+class BlockIn(BaseModel):
+    time: str
+    label: str
+    detail: str | None = None
+    color: str = "neutral"
+    remind: bool = True
+    days: str = "0123456"        # weekday digits, Mon=0…Sun=6
+    starts_on: str | None = None  # ISO; default today
+
+
+class BlockPatch(BaseModel):
+    time: str | None = None
+    label: str | None = None
+    detail: str | None = None
+    color: str | None = None
+    remind: bool | None = None
+    days: str | None = None
+    starts_on: str | None = None
+    apply_from: str | None = None  # ISO: 'this and following days' — splits the block
+
+
+class ScheduleLogIn(BaseModel):
+    day: str | None = None       # ISO; default today
+    block_id: int | None = None  # template block …
+    entry_id: int | None = None  # … or a one-off item
+    done: bool | None = None
+    note: str | None = None
+
+
+class OneOffIn(BaseModel):
+    day: str
+    time: str
+    label: str
+    detail: str | None = None
+
+
+def _sched_day(s: str | None) -> date:
+    if s is None:
+        return date.today()
+    try:
+        return date.fromisoformat(s)
+    except ValueError:
+        raise HTTPException(400, f"Invalid day '{s}' — use ISO YYYY-MM-DD.")
+
+
+@app.get("/api/schedule/blocks")
+def schedule_blocks() -> dict:
+    """The editable template."""
+    return {"blocks": store.list_blocks()}
+
+
+@app.post("/api/schedule/blocks")
+def schedule_block_create(body: BlockIn) -> dict:
+    try:
+        return {"ok": True, "block": schedule.create_block(
+            body.time, body.label, body.detail, body.color, body.remind,
+            body.days, body.starts_on)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.patch("/api/schedule/blocks/{block_id}")
+def schedule_block_edit(block_id: int, body: BlockPatch) -> dict:
+    """Edit everywhere, or — with apply_from — from that day onward (the old
+    version ends the day before; past days keep it)."""
+    fields = dict(time=body.time, label=body.label, detail=body.detail,
+                  color=body.color, remind=body.remind, days=body.days,
+                  starts_on=body.starts_on)
+    try:
+        if body.apply_from:
+            block = schedule.edit_block_from(block_id, _sched_day(body.apply_from), **fields)
+        else:
+            block = schedule.edit_block(block_id, **fields)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True, "block": block}
+
+
+@app.delete("/api/schedule/blocks/{block_id}")
+def schedule_block_remove(block_id: int, from_day: str | None = Query(default=None, alias="from")) -> dict:
+    """Remove from `from` (default today) onward — never deletes; earlier days
+    keep rendering the block as it was."""
+    try:
+        schedule.end_block(block_id, _sched_day(from_day))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return {"ok": True}
+
+
+@app.get("/api/schedule/day")
+def schedule_day(day: str | None = None) -> dict:
+    """One day's timeline: blocks + log state + one-offs + synced-context chips."""
+    return schedule.day_view(_sched_day(day))
+
+
+@app.get("/api/schedule/month")
+def schedule_month(month: str = Query(default="")) -> dict:
+    """Calendar rollup for 'YYYY-MM' (default: this month) + per-block adherence."""
+    try:
+        y, m = (int(p) for p in (month or date.today().strftime("%Y-%m")).split("-"))
+        date(y, m, 1)
+    except (ValueError, TypeError):
+        raise HTTPException(400, f"Invalid month '{month}' — use YYYY-MM.")
+    return schedule.month_view(y, m)
+
+
+@app.post("/api/schedule/log")
+def schedule_log(body: ScheduleLogIn) -> dict:
+    """Mark a block done/missed and/or note it. Partial — only sent fields change."""
+    try:
+        schedule.log(_sched_day(body.day), body.block_id, body.entry_id,
+                     body.done, body.note)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True, "day": schedule.day_view(_sched_day(body.day))}
+
+
+@app.post("/api/schedule/oneoff")
+def schedule_oneoff(body: OneOffIn) -> dict:
+    """Add a one-off item to a single day."""
+    try:
+        item = schedule.add_oneoff(_sched_day(body.day), body.time, body.label, body.detail)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True, "entry": item, "day": schedule.day_view(_sched_day(body.day))}
+
+
+@app.delete("/api/schedule/entries/{entry_id}")
+def schedule_entry_delete(entry_id: int) -> dict:
+    try:
+        schedule.remove_oneoff(entry_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True}
+
+
+# --- web push (phone reminders) ------------------------------------------------
+
+class PushSubscribeIn(BaseModel):
+    subscription: dict
+
+
+class PushUnsubscribeIn(BaseModel):
+    endpoint: str
+
+
+@app.get("/api/push/key")
+def push_key() -> dict:
+    """The VAPID public key the browser subscribes with, plus how many devices are on."""
+    return {"key": push.public_key(), "subscriptions": push.subscription_count()}
+
+
+@app.post("/api/push/subscribe")
+def push_subscribe(body: PushSubscribeIn) -> dict:
+    try:
+        push.subscribe(body.subscription)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True, "subscriptions": push.subscription_count()}
+
+
+@app.post("/api/push/unsubscribe")
+def push_unsubscribe(body: PushUnsubscribeIn) -> dict:
+    return {"ok": push.unsubscribe(body.endpoint),
+            "subscriptions": push.subscription_count()}
+
+
+@app.post("/api/push/test")
+def push_test() -> dict:
+    """Send a test push to every subscribed device — the 'did it work?' button."""
+    n = push.send_all("fettle", "Push reminders are working on this device.", ttl=300)
+    return {"delivered": n}
 
 
 # --- goals -------------------------------------------------------------------

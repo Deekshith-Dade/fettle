@@ -8,3 +8,4 @@ pydantic-settings==2.7.1
 python-multipart==0.0.32
 python-dateutil==2.9.0.post0
 pytest==9.1.1  # dev: backend/tests — the stats-engine regression net
+pywebpush==2.3.0

@@ -106,6 +106,19 @@ def _goal_alerts(state: dict) -> list[tuple[str, str, str]]:
 
 # --- delivery --------------------------------------------------------------------
 
+def deliver(title: str, body: str, ttl: int = 900, url: str = "/") -> bool:
+    """Every channel: the macOS toast plus web push to subscribed phones/browsers.
+    `ttl` caps how stale a push may arrive (short for schedule nudges, longer for
+    alerts). True when at least one channel delivered."""
+    ok = _send_macos(title, body)
+    try:
+        from . import push
+        ok = bool(push.send_all(title, body, url=url, ttl=ttl)) or ok
+    except Exception:  # noqa: BLE001 — push must never break the toast path
+        pass
+    return ok
+
+
 def _send_macos(title: str, body: str) -> bool:
     if platform.system() != "Darwin":
         return False
@@ -146,7 +159,7 @@ def check_and_send() -> list[dict]:
         kind = key.split(":", 1)[0]
         if not _cooled_down(state, key, kind):
             continue
-        delivered = _send_macos(title, body)
+        delivered = deliver(title, body, ttl=6 * 3600)  # alerts stay relevant for hours
         state.setdefault("fired", {})[key] = _now().isoformat()
         sent.append({"key": key, "title": title, "body": body, "delivered": delivered})
 

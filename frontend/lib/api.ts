@@ -1,11 +1,16 @@
 // Tiny client for the fettle FastAPI backend.
 // Default: the same host the dashboard was loaded from, port 8400 — so localhost works
 // at the desk and the Mac's Tailscale name/IP works from a phone, with zero config.
+// Over HTTPS (the Tailscale Serve proxy, which path-mounts /api and /auth alongside
+// the frontend) the API is same-origin, so the base is empty — mixed-content rules
+// would block an https page calling http://host:8400 anyway.
 // Set NEXT_PUBLIC_API_BASE only to override (e.g. backend on a different machine).
 const BASE =
   process.env.NEXT_PUBLIC_API_BASE ??
   (typeof window !== "undefined"
-    ? `${window.location.protocol}//${window.location.hostname}:8400`
+    ? window.location.protocol === "https:"
+      ? ""
+      : `${window.location.protocol}//${window.location.hostname}:8400`
     : "http://localhost:8400");
 
 export type DataTypeInfo = {
@@ -163,6 +168,49 @@ export type SleepDetail = {
   nights: SleepNight[];
 };
 
+// --- the daily schedule (time-anchored blocks, marked done by hand) ---
+export type ScheduleColor = "neutral" | "focus" | "move" | "food" | "wind";
+export type ScheduleBlock = {
+  id: number;
+  time: string; // "HH:MM"
+  label: string;
+  detail: string | null;
+  color: ScheduleColor;
+  remind: number; // 1 = pre-block nudge on
+  active: number;
+  days: string; // weekday digits it recurs on, "0"=Mon…"6"=Sun (e.g. "01234" = weekdays)
+  starts_on: string; // ISO date the block takes effect
+  ends_on: string | null; // ISO date it last applies (null = open-ended)
+  created_at: string;
+};
+export type ScheduleItem = {
+  id: number | null;       // entry id (exists once the block was touched)
+  block_id: number | null; // null = one-off item for that day
+  time: string | null;
+  label: string;
+  detail: string | null;
+  color: ScheduleColor;
+  remind: boolean;
+  done: boolean | null;    // null = unlogged
+  note: string | null;
+  oneoff: boolean;
+};
+export type ScheduleDay = {
+  date: string;
+  items: ScheduleItem[];
+  done: number;
+  total: number;
+  context: { trained: string | null; bed: string | null; wake: string | null };
+};
+export type ScheduleMonth = {
+  month: string; // "YYYY-MM"
+  days: { date: string; done: number; total: number; future: boolean }[];
+  kept: number;
+  of: number;
+  pct: number | null;
+  block_stats: { block_id: number; label: string; color: ScheduleColor; done: number; days: number; pct: number }[];
+};
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
@@ -278,6 +326,65 @@ export const api = {
     }).then((r) => r.json()),
   deleteGoal: (id: number) =>
     fetch(`${BASE}/api/goals/${id}`, { method: "DELETE" }).then((r) => r.json()),
+  scheduleDay: (date?: string) =>
+    get<ScheduleDay>(`/api/schedule/day${date ? `?day=${date}` : ""}`),
+  scheduleMonth: (month?: string) =>
+    get<ScheduleMonth>(`/api/schedule/month${month ? `?month=${month}` : ""}`),
+  scheduleBlocks: () => get<{ blocks: ScheduleBlock[] }>("/api/schedule/blocks"),
+  scheduleLog: (body: {
+    day?: string; block_id?: number; entry_id?: number; done?: boolean; note?: string;
+  }) =>
+    fetch(`${BASE}/api/schedule/log`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => r.json()),
+  scheduleOneoff: (body: { day: string; time: string; label: string; detail?: string }) =>
+    fetch(`${BASE}/api/schedule/oneoff`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => r.json()),
+  scheduleDeleteEntry: (id: number) =>
+    fetch(`${BASE}/api/schedule/entries/${id}`, { method: "DELETE" }).then((r) => r.json()),
+  scheduleCreateBlock: (body: {
+    time: string; label: string; detail?: string; color?: ScheduleColor; remind?: boolean;
+    days?: string; starts_on?: string;
+  }) =>
+    fetch(`${BASE}/api/schedule/blocks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => r.json()),
+  schedulePatchBlock: (id: number, body: {
+    time?: string; label?: string; detail?: string; color?: ScheduleColor;
+    remind?: boolean; days?: string; starts_on?: string;
+    apply_from?: string; // ISO — "this and following days": splits, past keeps the old version
+  }) =>
+    fetch(`${BASE}/api/schedule/blocks/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => r.json()),
+  scheduleRemoveBlock: (id: number, from?: string) =>
+    fetch(`${BASE}/api/schedule/blocks/${id}${from ? `?from=${from}` : ""}`, {
+      method: "DELETE",
+    }).then((r) => r.json()),
+  pushKey: () => get<{ key: string; subscriptions: number }>("/api/push/key"),
+  pushSubscribe: (subscription: unknown) =>
+    fetch(`${BASE}/api/push/subscribe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subscription }),
+    }).then((r) => r.json()),
+  pushUnsubscribe: (endpoint: string) =>
+    fetch(`${BASE}/api/push/unsubscribe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint }),
+    }).then((r) => r.json()),
+  pushTest: (): Promise<{ delivered: number }> =>
+    fetch(`${BASE}/api/push/test`, { method: "POST" }).then((r) => r.json()),
 };
 
 // --- AI coach chat -------------------------------------------------------------

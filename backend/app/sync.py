@@ -121,6 +121,7 @@ def _sync_sleep(client: HealthClient, today: date) -> TypeResult:
     result = TypeResult(data_type="sleep")
     try:
         agg: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        sessions: list[dict] = []
         for p in client.list_all("sleep"):
             s = p.get("sleep", {})
             iv = s.get("interval", {})
@@ -134,6 +135,23 @@ def _sync_sleep(client: HealthClient, today: date) -> TypeResult:
             asleep = staged + per["ASLEEP"]         # ASLEEP: a classic night's single span
             awake = per["AWAKE"] + per["RESTLESS"]  # RESTLESS appears on classic logs only
             in_bed = _duration_s(iv.get("startTime"), iv.get("endTime")) or (asleep + awake)
+
+            # Keep the session itself too — the rep tracker scores bed/wake *clock times*
+            # (in bed by 23:30, up by 7:45), which the daily aggregates don't carry.
+            if iv.get("startTime"):
+                to_local = lambda ts, off: (  # noqa: E731
+                    _parse_ts(ts) + timedelta(seconds=_offset_seconds(off))
+                ).replace(tzinfo=None).isoformat()
+                sessions.append({
+                    "id": p.get("name") or f"sleep/{iv['endTime']}",
+                    "day": day,
+                    "start_ts": iv["startTime"],
+                    "start_local": to_local(iv["startTime"], iv.get("startUtcOffset")),
+                    "end_ts": iv["endTime"],
+                    "end_local": to_local(iv["endTime"], iv.get("endUtcOffset")),
+                    "duration_min": round((asleep or in_bed) / 60.0, 1),
+                    "raw": json.dumps(p),
+                })
             a = agg[day]
             a["sleep-duration"] += asleep
             a["sleep-rem"] += per["REM"]
@@ -155,6 +173,7 @@ def _sync_sleep(client: HealthClient, today: date) -> TypeResult:
         rows += store.upsert_daily_values("sleep-efficiency", "%", eff)
         rows += store.upsert_daily_values("sleep-score", "", _sleep_scores(agg, eff))
         result.daily_rows = rows
+        result.intraday_rows = store.upsert_sleep_sessions(sessions)  # session-level detail
         store.set_watermark("sleep", "daily", today)
     except Exception as exc:
         result.error = f"{type(exc).__name__}: {exc}"

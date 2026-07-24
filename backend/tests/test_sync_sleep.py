@@ -28,16 +28,24 @@ def _session(start: str, end: str, stages: list[tuple[str, str, str]]) -> dict:
     }}
 
 
-def _run(monkeypatch, sessions: list[dict]) -> dict[str, dict[str, float]]:
-    """_sync_sleep against a canned session list; returns {metric: {day: value}}."""
+def _run(monkeypatch, sessions: list[dict],
+         kept: list[dict] | None = None) -> dict[str, dict[str, float]]:
+    """_sync_sleep against a canned session list; returns {metric: {day: value}}.
+    Pass `kept` to also capture the persisted session rows (bed/wake clock times)."""
     written: dict[str, dict[str, float]] = {}
 
     def upsert(metric, unit, values):
         written[metric] = dict(values)
         return len(values)
 
+    def keep_sessions(rows):
+        if kept is not None:
+            kept.extend(rows)
+        return len(rows)
+
     monkeypatch.setattr(sync, "store", types.SimpleNamespace(
-        upsert_daily_values=upsert, set_watermark=lambda *a: None))
+        upsert_daily_values=upsert, upsert_sleep_sessions=keep_sessions,
+        set_watermark=lambda *a: None))
     client = types.SimpleNamespace(list_all=lambda name: iter(sessions))
     res = sync._sync_sleep(client, TODAY)
     assert res.error is None
@@ -86,3 +94,16 @@ def test_unprocessed_stub_session_writes_nothing(monkeypatch):
     w = _run(monkeypatch, [_session("05:40", "13:32", [])])
     for metric, values in w.items():
         assert DAY not in values, f"{metric} wrote a row for a night with no data"
+
+
+def test_sessions_persist_with_local_clock_times(monkeypatch):
+    # The rep tracker's sleep anchor needs bed/wake as *local* clock times: 05:30Z at
+    # UTC-6 is a 23:30 bed the previous evening.
+    kept: list[dict] = []
+    _run(monkeypatch, [_session("05:30", "13:30", [("05:30", "13:30", "ASLEEP")])], kept)
+    assert len(kept) == 1
+    s = kept[0]
+    assert s["day"] == DAY
+    assert s["start_local"] == "2026-07-14T23:30:00"
+    assert s["end_local"] == "2026-07-15T07:30:00"
+    assert s["duration_min"] == 480.0

@@ -29,3 +29,5 @@ npm-debug.log*
 
 # TypeScript incremental build cache
 frontend/tsconfig.tsbuildinfo
+frontend/public/fettle-root-ca.pem
+backend/vapid_private.pem
