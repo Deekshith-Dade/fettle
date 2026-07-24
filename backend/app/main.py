@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import date
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 from . import (
@@ -448,6 +449,27 @@ def push_test() -> dict:
     """Send a test push to every subscribed device — the 'did it work?' button."""
     n = push.send_all("fettle", "Push reminders are working on this device.", ttl=300)
     return {"delivered": n}
+
+
+# --- home-screen icons -------------------------------------------------------
+
+# iOS builds webclip tiles with a system fetcher that rejects the proxy's mkcert
+# cert and can't be trusted to resolve ts.net names, so both apps' icon links
+# point here: plain http on the tailscale IP — the one fetch pattern the phone
+# has demonstrably completed (pre-proxy installs got their icons this way) — and
+# uvicorn's access log makes every attempt visible. Tally's icons ride along
+# because this is the only request-logged server on the Mac; webclips bake the
+# icon at add-time, so the cross-app URL never matters after install.
+_ICONS_DIR = Path(__file__).resolve().parent.parent / "icons"
+
+
+@app.api_route("/api/icon/{name}", methods=["GET", "HEAD"])
+def app_icon(name: str) -> FileResponse:
+    path = _ICONS_DIR / name
+    if not path.is_file() or path.parent != _ICONS_DIR or path.suffix != ".png":
+        raise HTTPException(status_code=404, detail="no such icon")
+    return FileResponse(path, media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=3600"})
 
 
 # --- goals -------------------------------------------------------------------

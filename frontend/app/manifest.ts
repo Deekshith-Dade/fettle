@@ -14,8 +14,10 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: "#0a0b0d",
     theme_color: "#0a0b0d",
     icons: [
-      { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
-      { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      // Absolute http-IP URLs, same story as layout.tsx icons.apple: iOS may take
+      // the tile from the manifest, and its fetcher chokes on the mkcert origin.
+      { src: "http://100.107.250.93:8400/api/icon/f-192.png", sizes: "192x192", type: "image/png" },
+      { src: "http://100.107.250.93:8400/api/icon/f-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
     ],
   };
 }
