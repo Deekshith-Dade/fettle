@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Scheduled fettle sync: runs `python cli.py sync` four times a day (which also
+  refreshes the briefing and sends any due notifications).
+  Fixed clock times instead of StartInterval: interval timers pause while the
+  laptop sleeps (runs silently stopped happening); calendar runs missed during
+  sleep coalesce to the next wake.
+  Install:   cp ops/com.fettle.sync.plist ~/Library/LaunchAgents/
+             launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.fettle.sync.plist
+  Remove:    launchctl bootout gui/$(id -u)/com.fettle.sync
+  Logs:      ~/Library/Logs/fettle-sync.log
+  Run now:   launchctl kickstart gui/$(id -u)/com.fettle.sync
+  Exit 2 in the log means the 7-day token died - re-run `python cli.py auth`.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.fettle.sync</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/deekshith/Documents/Projects/agents/claude-agents/fettle/backend/.venv/bin/python</string>
+        <string>cli.py</string>
+        <string>sync</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/deekshith/Documents/Projects/agents/claude-agents/fettle/backend</string>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Hour</key>
+            <integer>5</integer>
+            <key>Minute</key>
+            <integer>45</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>11</integer>
+            <key>Minute</key>
+            <integer>45</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>17</integer>
+            <key>Minute</key>
+            <integer>45</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>23</integer>
+            <key>Minute</key>
+            <integer>45</integer>
+        </dict>
+    </array>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/Users/deekshith/Library/Logs/fettle-sync.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/deekshith/Library/Logs/fettle-sync.log</string>
+</dict>
+</plist>
