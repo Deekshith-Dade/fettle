@@ -1,24 +1,21 @@
-"""Production entrypoint: uvicorn on a genuine dual-stack socket.
+"""Production entrypoint: uvicorn bound to loopback only.
 
-`uvicorn --host ::` binds IPv6-only on macOS (asyncio sets IPV6_V6ONLY), so the API
-is reachable over ::1 but NOT over IPv4 — including the Tailscale 100.x address the
-phone uses, which makes the page load but every fetch fail ("TypeError: Load failed").
-Binding the socket ourselves with IPV6_V6ONLY=0 accepts BOTH families (127.0.0.1 and
-Safari's ::1 at the desk, tailnet IPv4/IPv6 from the phone), matching how node serves
-the frontend. Port from argv[1] or $FETTLE_PORT, default 8400.
+The API is deliberately unreachable from the LAN and from raw tailnet IP:port.
+Every consumer reaches it through this same machine:
+  - the phone: https://<mac>.ts.net:8444, where Tailscale Serve terminates TLS
+    and path-mounts /api and /auth onto 127.0.0.1:8400 (same-origin for the
+    dashboard, so no CORS or mixed-content trouble);
+  - the desk: http://localhost:8400 (IPv6-first clients fall back to IPv4
+    loopback on their own).
+The old hand-rolled dual-stack socket existed only so raw tailnet IPv4 could
+reach uvicorn directly; with Serve fronting everything, plain 127.0.0.1 is
+enough. Port from argv[1] or $FETTLE_PORT, default 8400.
 """
 import os
-import socket
 import sys
 
 import uvicorn
 
 PORT = int(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("FETTLE_PORT", "8400"))
 
-sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)  # accept IPv4 too
-sock.bind(("::", PORT))
-sock.listen(128)
-
-uvicorn.Server(uvicorn.Config("app.main:app", fd=sock.fileno())).run()
+uvicorn.run("app.main:app", host="127.0.0.1", port=PORT)

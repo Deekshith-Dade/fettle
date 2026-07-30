@@ -24,6 +24,8 @@
         <string>start</string>
         <string>-p</string>
         <string>3400</string>
+        <string>-H</string>
+        <string>127.0.0.1</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/deekshith/Documents/Projects/agents/claude-agents/fettle/frontend</string>
