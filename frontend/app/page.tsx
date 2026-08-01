@@ -13,7 +13,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api, BenchmarksResponse, Briefing, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, Point, Recommendation, ScheduleBlock, ScheduleColor, ScheduleDay, ScheduleItem, ScheduleMonth, Ring, RingsData, SetupStatus, SleepDetail, VitalAge, Workout, WorkoutDetail } from "@/lib/api";
+import { api, BenchmarksResponse, Briefing, CoachResponse, DataTypeInfo, Goal, GoalsResponse, Insight, LightsStatus, Point, Recommendation, ScheduleBlock, ScheduleColor, ScheduleDay, ScheduleItem, ScheduleMonth, Ring, RingsData, SetupStatus, SleepDetail, VitalAge, Workout, WorkoutDetail } from "@/lib/api";
 import { BenchmarksView, SleepView, SleepTeaser, StandingTeaser } from "@/components/insights-views";
 import { CommandPalette } from "@/components/command-palette";
 import { SetupWizard } from "@/components/setup-wizard";
@@ -2049,6 +2049,121 @@ function ScheduleCard({ data, onGo }: { data: ScheduleDay; onGo: () => void }) {
   );
 }
 
+/* ————— circadian light (the bedside Matter lamp) ————— */
+
+// mireds → a display color: amber ember → paper neutral → cool daylight.
+function cctColor(mireds: number): string {
+  const k = 1_000_000 / Math.max(mireds, 1);
+  const t = clamp((k - 2200) / (6500 - 2200), 0, 1);
+  const stops: [number, [number, number, number]][] = [
+    [0, [240, 176, 84]], [0.5, [239, 229, 210]], [1, [190, 219, 247]],
+  ];
+  let lo = stops[0], hi = stops[stops.length - 1];
+  for (const s of stops) { if (s[0] <= t) lo = s; }
+  for (let i = stops.length - 1; i >= 0; i--) { if (stops[i][0] >= t) hi = stops[i]; }
+  const p = hi[0] === lo[0] ? 0 : (t - lo[0]) / (hi[0] - lo[0]);
+  const c = lo[1].map((v, i) => Math.round(v + (hi[1][i] - v) * p));
+  return `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
+}
+
+function humanReason(r: string | undefined | null): string {
+  if (!r) return "—";
+  if (r.startsWith("override:")) return `override — ${r.slice(9)}`;
+  return {
+    "night": "night — lights out", "sunrise": "sunrise ramp",
+    "morning-boost": "morning light dose", "day-high-sun": "full daylight",
+    "day": "daylight", "golden-hour": "golden hour", "evening": "evening warm",
+    "wind-down": "wind-down", "lights-out": "lights out", "away": "away — off",
+    "nap-fade": "nap — fading down", "nap-dark": "nap — dark",
+    "nap-wake": "nap — light waking you",
+  }[r] ?? r;
+}
+
+function LightCard() {
+  const [st, setSt] = useState<LightsStatus | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = () => api.lights().then(setSt).catch(() => setSt(null));
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 30_000);
+    return () => clearInterval(t);
+  }, []);
+  if (!st || !st.reachable) return null; // no lamp, no card — never an error box
+
+  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+  const act = st.actual;
+  const pct = act?.level != null ? Math.round((act.level / 254) * 100) : null;
+  const kelvin = act?.mireds ? Math.round(1_000_000 / act.mireds / 50) * 50 : null;
+  const journey = st.journey;
+  const overrideOn = !journey && !!st.override;
+  const holdoff = !journey && !overrideOn && !!st.holdoff_until;
+
+  const doOverride = async (mode: string) => {
+    setBusy(mode);
+    try { await api.lightsOverride(mode, 60); await load(); } finally { setBusy(null); }
+  };
+  const doNap = async () => {
+    setBusy("nap");
+    try { await api.lightsJourney("nap", 60); await load(); } finally { setBusy(null); }
+  };
+  const resume = async () => {
+    setBusy("resume");
+    try { await api.lightsClearOverride(); await load(); } finally { setBusy(null); }
+  };
+
+  return (
+    <section className="section rise" style={{ animationDelay: "70ms" }}>
+      <div className="light-card">
+        <div className="light-head">
+          <div>
+            <p className="eyebrow">Circadian light</p>
+            <p className="light-now">
+              {act?.on
+                ? <>lamp on · {pct}% · {kelvin} K</>
+                : <>lamp off</>}
+              <span className="light-reason">
+                {journey ? `${humanReason(journey.phase)} · until ${fmtClock(journey.ends)}`
+                  : overrideOn ? humanReason(`override:${st.override!.mode}`)
+                  : holdoff ? "hand-adjusted — engine holding off"
+                  : humanReason(st.target?.reason)}
+              </span>
+            </p>
+          </div>
+          <div className="light-actions">
+            <button className="btn" disabled={busy !== null} onClick={doNap}>Nap 1h</button>
+            <button className="btn" disabled={busy !== null} onClick={() => doOverride("focus")}>Focus</button>
+            <button className="btn" disabled={busy !== null} onClick={() => doOverride("movie")}>Movie</button>
+            <button className="btn" disabled={busy !== null} onClick={() => doOverride("off")}>Off 1h</button>
+            {(!!journey || overrideOn || holdoff) && (
+              <button className="btn btn-lime" disabled={busy !== null} onClick={resume}>Resume</button>
+            )}
+          </div>
+        </div>
+        <svg className="light-strip" viewBox="0 0 288 44" preserveAspectRatio="none" aria-hidden>
+          {st.curve.map((p, i) => {
+            if (!p.on) return null;
+            const h = Math.max(2, (p.level / 254) * 34);
+            return <rect key={i} x={i * 2} y={40 - h} width={1.7} height={h}
+                         fill={cctColor(p.mireds)} opacity={0.85} />;
+          })}
+          {/* 288 viewBox units span 1440 minutes → 0.2 units per minute */}
+          {([["wake", st.anchors.wake], ["wind", st.anchors.wind], ["bed", st.anchors.bed]] as const)
+            .filter(([, m]) => m != null)
+            .map(([k, m]) => (
+              <line key={k} x1={m! * 0.2} x2={m! * 0.2} y1={2} y2={42}
+                    stroke="var(--faint)" strokeWidth={0.6} strokeDasharray="2 3" />
+            ))}
+          <line x1={nowMin * 0.2} x2={nowMin * 0.2}
+                y1={0} y2={44} stroke="var(--lime)" strokeWidth={1.2} />
+        </svg>
+        <div className="light-axis" aria-hidden>
+          <span>12a</span><span>6a</span><span>12p</span><span>6p</span><span>12a</span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function Dashboard() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [setup, setSetup] = useState<SetupStatus | null>(null);
@@ -2658,6 +2773,9 @@ export default function Dashboard() {
           {view === "overview" && todaySched && (
             <ScheduleCard data={todaySched} onGo={() => go("schedule")} />
           )}
+
+          {/* ———— OVERVIEW · circadian light (renders only when the lamp answers) ———— */}
+          {view === "overview" && <LightCard />}
 
           {/* ———— OVERVIEW · vital age ———— */}
           {view === "overview" && vitalAge && (

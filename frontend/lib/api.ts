@@ -211,6 +211,38 @@ export type ScheduleMonth = {
   block_stats: { block_id: number; label: string; color: ScheduleColor; done: number; days: number; pct: number }[];
 };
 
+// --- circadian lighting (the bedside Matter lamp) ---
+export type LightTarget = {
+  on: boolean;
+  level: number;   // Matter Level 1..254
+  mireds: number;  // 1e6 / kelvin
+  reason: string;  // sunrise | morning-boost | day* | wind-down | night | override:* …
+  transition_s: number;
+};
+export type LightCurvePoint = LightTarget & { time: string }; // "HH:MM"
+export type LightLogRow = {
+  ts: string;
+  source: "engine" | "manual" | "override" | "api";
+  on: number;
+  level: number;
+  mireds: number;
+  reason: string | null;
+};
+export type LightsStatus = {
+  ts: string;
+  reachable: boolean;
+  home: boolean;
+  actual: { on: boolean; level: number | null; mireds: number | null } | null;
+  target: LightTarget | null;      // null while a manual-touch holdoff is active
+  override?: { mode: string; until: string };
+  journey?: { kind: string; ends: string; phase: string };  // e.g. a running nap
+  holdoff_until?: string;
+  applied?: boolean;
+  curve: LightCurvePoint[];
+  anchors: { wake: number | null; wind: number | null; bed: number | null };
+  log: LightLogRow[];
+};
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
@@ -385,6 +417,27 @@ export const api = {
     }).then((r) => r.json()),
   pushTest: (): Promise<{ delivered: number }> =>
     fetch(`${BASE}/api/push/test`, { method: "POST" }).then((r) => r.json()),
+  lights: () => get<LightsStatus>("/api/lights"),
+  lightsOverride: (mode: string, minutes = 60) =>
+    fetch(`${BASE}/api/lights/override`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode, minutes }),
+    }).then((r) => r.json()),
+  lightsClearOverride: () =>
+    fetch(`${BASE}/api/lights/override`, { method: "DELETE" }).then((r) => r.json()),
+  lightsSet: (body: { on: boolean; level_pct?: number; kelvin?: number }) =>
+    fetch(`${BASE}/api/lights/set`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => r.json()),
+  lightsJourney: (kind: string, minutes: number) =>
+    fetch(`${BASE}/api/lights/journey`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind, minutes }),
+    }).then((r) => r.json()),
 };
 
 // --- AI coach chat -------------------------------------------------------------

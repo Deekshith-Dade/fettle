@@ -31,3 +31,9 @@ npm-debug.log*
 frontend/tsconfig.tsbuildinfo
 frontend/public/fettle-root-ca.pem
 backend/vapid_private.pem
+
+# Matter controller runtime — the fabric's device keys live in storage/
+matter/venv/
+matter/storage/
+matter/logs/
+matter/netprobe_result.txt

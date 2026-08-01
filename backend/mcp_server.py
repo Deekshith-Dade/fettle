@@ -601,5 +601,78 @@ def show_intraday(metric: IntradayMetric, day: str = "") -> str:
     return _shown(f"Intraday {label} trace for {day or 'today'}")
 
 
+# --- the bedside lamp (circadian lighting) -----------------------------------
+# These go through the backend's HTTP API (loopback) rather than the Matter
+# socket directly: one code path, one engine, and the holdoff/override
+# bookkeeping stays consistent no matter who flips the light.
+
+import json as _json
+import urllib.error
+import urllib.request
+
+_API = "http://127.0.0.1:8400"
+
+
+def _api(method: str, path: str, body: dict | None = None) -> dict:
+    req = urllib.request.Request(
+        _API + path, method=method,
+        data=_json.dumps(body).encode() if body is not None else None,
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=25) as r:
+            return _json.loads(r.read())
+    except urllib.error.URLError as exc:
+        return {"error": f"fettle backend unreachable: {exc}"}
+
+
+@mcp.tool()
+def get_light() -> dict:
+    """The bedside lamp right now: actual state, the circadian engine's current
+    target and why (sunrise / morning-boost / day / wind-down / night...), any
+    active override or manual-touch holdoff, and today's schedule anchors.
+    Call before changing the light so you know what the engine intends."""
+    d = _api("GET", "/api/lights")
+    d.pop("curve", None)  # the 10-min curve is dashboard fodder — too bulky here
+    return d
+
+
+@mcp.tool()
+def set_light(on: bool = True, brightness_pct: int | None = None,
+              kelvin: int | None = None) -> dict:
+    """Set the bedside lamp directly (brightness 1-100, color 2200-6500 K).
+    The circadian engine backs off for 2 hours afterwards — a deliberate hand
+    on the lamp outranks the schedule. Use light_override for the presets."""
+    return _api("POST", "/api/lights/set",
+                {"on": on, "level_pct": brightness_pct, "kelvin": kelvin})
+
+
+@mcp.tool()
+def light_override(mode: str, minutes: int = 60) -> dict:
+    """Hold the lamp in a preset for a while: 'focus' (cool bright), 'movie'
+    (dim ember), 'warm' (cozy reading), or 'off'. The engine resumes its curve
+    when the time is up. Use clear_light_override to hand control back early."""
+    return _api("POST", "/api/lights/override", {"mode": mode, "minutes": minutes})
+
+
+@mcp.tool()
+def start_nap_lighting(minutes: int = 60) -> dict:
+    """Run a nap light journey on the bedside lamp. When the user says they're
+    napping / lying down / resting for a while, call this with the duration
+    (15-240 min; "half an hour"→30, "an hour"→60, "a couple hours"→120).
+    The lamp fades to darkness over ~3 minutes, stays dark through the nap,
+    and in the final minutes rises from a 2200K ember to warm light — the
+    light itself ends the nap, no jarring alarm. The circadian engine resumes
+    its normal curve when the journey completes. Cancel early with
+    clear_light_override."""
+    return _api("POST", "/api/lights/journey", {"kind": "nap", "minutes": minutes})
+
+
+@mcp.tool()
+def clear_light_override() -> dict:
+    """Cancel any lamp override, manual-touch holdoff, or running light journey
+    (e.g. a nap ended early) and put the circadian engine back in charge now."""
+    return _api("DELETE", "/api/lights/override")
+
+
 if __name__ == "__main__":
     mcp.run()  # stdio transport (what opencode launches)

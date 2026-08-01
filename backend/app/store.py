@@ -151,6 +151,32 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 -- v2 of the accountability feature: the rep_days prototype was replaced by the
 -- schedule tables above before it ever held data.
 DROP TABLE IF EXISTS rep_days;
+
+-- Circadian lighting: every lamp transition — the engine's or the human's —
+-- so the dashboard strip can show planned vs lived light, and so light
+-- exposure can sit next to the sleep metrics it exists to serve.
+CREATE TABLE IF NOT EXISTS light_log (
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts     TEXT NOT NULL,
+    source TEXT NOT NULL,     -- engine|manual|override|api
+    "on"   INTEGER NOT NULL,
+    level  INTEGER NOT NULL,  -- Matter Level 0..254
+    mireds INTEGER NOT NULL,
+    reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_light_log_ts ON light_log (ts);
+
+-- Single-row engine state that must survive restarts: the manual-touch
+-- holdoff, the active override, and the last setpoint we applied.
+CREATE TABLE IF NOT EXISTS light_state (
+    id            INTEGER PRIMARY KEY CHECK (id = 1),
+    holdoff_until TEXT,
+    override_mode TEXT,
+    override_until TEXT,
+    last_applied  TEXT,       -- JSON LightTarget
+    journey       TEXT,       -- JSON: an active timed light journey (nap, …)
+    updated_at    TEXT
+);
 """
 
 
@@ -159,6 +185,10 @@ def init_db(path: Path | None = None) -> None:
         # WAL lets the dashboard keep reading while a (possibly scheduled) sync writes.
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA)
+        # v2 of light_state: timed journeys (nap → fade / dark / gentle wake).
+        lcols = [r[1] for r in conn.execute("PRAGMA table_info(light_state)").fetchall()]
+        if lcols and "journey" not in lcols:
+            conn.execute("ALTER TABLE light_state ADD COLUMN journey TEXT")
         # v2 of schedule_blocks: recurrence (days) + effect window (starts_on/ends_on).
         cols = [r[1] for r in conn.execute("PRAGMA table_info(schedule_blocks)").fetchall()]
         if "days" not in cols:
@@ -864,3 +894,56 @@ def sync_status() -> list[dict]:
                 "ORDER BY data_type, kind"
             ).fetchall()
         ]
+
+
+# --- circadian lighting -------------------------------------------------------
+
+def light_log_add(source: str, on: bool, level: int, mireds: int,
+                  reason: str | None = None) -> None:
+    with _connect() as conn:
+        conn.execute(
+            'INSERT INTO light_log (ts, source, "on", level, mireds, reason) '
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (datetime.now().isoformat(timespec="seconds"), source, int(on),
+             int(level), int(mireds), reason),
+        )
+
+
+def light_log_recent(hours: int = 24) -> list[dict]:
+    cutoff = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
+    with _connect() as conn:
+        return [
+            dict(r) for r in conn.execute(
+                'SELECT ts, source, "on", level, mireds, reason FROM light_log '
+                "WHERE ts >= ? ORDER BY ts", (cutoff,)
+            ).fetchall()
+        ]
+
+
+def light_state_get() -> dict:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM light_state WHERE id = 1").fetchone()
+    if not row:
+        return {}
+    out = dict(row)
+    for jf in ("last_applied", "journey"):
+        if out.get(jf):
+            out[jf] = json.loads(out[jf])
+    return out
+
+
+def light_state_save(**fields) -> None:
+    """Partial update of the single state row (creates it on first use).
+    Pass a field=None to clear it; omit it to leave it untouched."""
+    allowed = ("holdoff_until", "override_mode", "override_until", "last_applied",
+               "journey")
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    for jf in ("last_applied", "journey"):
+        if jf in updates and updates[jf] is not None:
+            updates[jf] = json.dumps(updates[jf])
+    updates["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    with _connect() as conn:
+        conn.execute("INSERT OR IGNORE INTO light_state (id) VALUES (1)")
+        sets = ", ".join(f"{k} = ?" for k in updates)
+        conn.execute(f"UPDATE light_state SET {sets} WHERE id = 1",
+                     tuple(updates.values()))

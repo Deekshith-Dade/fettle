@@ -67,6 +67,20 @@ class Settings(BaseSettings):
     birth_date: str = "1995-01-01"
     sex: str = "male"
 
+    # --- circadian lighting (the bedside Matter lamp) ---------------------------
+    # The Matter sidecar (ops/com.fettle.matter.plist) owns the fabric; the lamp
+    # was commissioned as node 3. Coordinates drive the solar baseline; the
+    # presence device is a substring of the phone's tailnet hostname (its direct
+    # endpoint being a LAN address is the "home" signal).
+    lights_enabled: bool = True
+    home_lat: float = 40.7608          # Salt Lake City
+    home_lon: float = -111.8910
+    matter_ws_url: str = "ws://127.0.0.1:5580/ws"
+    lamp_node_id: int = 3
+    lamp_endpoint: int = 1
+    lights_presence_device: str = "iphone"
+    lights_tick_seconds: int = 30
+
 
 settings = Settings()
 

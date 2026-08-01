@@ -123,6 +123,15 @@ cards with streaks and 28-day adherence, sorted by status:
 - **Notifications** — after a scheduled sync, macOS notifications fire only when
   something needs you: the 7-day token is about to die, several vitals drift
   together, or a goal streak you'd built breaks.
+- **Circadian lighting** — fettle runs its own **Matter fabric** (a
+  `python-matter-server` sidecar) and drives the bedside lamp through the day:
+  a sunrise ramp timed to end at the schedule's Wake block, daylight CCT that
+  tracks real sun elevation, a wind-down fade keyed to the wind block, lights-out
+  at the in-bed block. Presence-aware (the phone's Tailscale endpoint), and
+  respectful of hands: touch the lamp yourself and the engine backs off for two
+  hours. Overrides (Focus / Movie / Off) live on the dashboard card, the API, and
+  the coach's MCP tools; every transition lands in `light_log` next to the sleep
+  data it exists to serve.
 
 ## How the AI layer works
 
@@ -305,6 +314,31 @@ notch. It refreshes its data automatically when foregrounded after time away (th
 no reload gesture in standalone mode). iOS is happy to install over plain `http://` on
 a tailnet; no HTTPS or service worker required.
 
+### The bedside lamp (optional — Matter circadian lighting)
+
+Any Matter-over-WiFi color lamp on the same LAN works (built against a Govee
+Floor Lamp 2, SKU H607C). One-time setup:
+
+```
+python3.12 -m venv matter/venv && matter/venv/bin/pip install 'python-matter-server[server]'
+swiftc -O -o ~/Applications/FettleMatter.app/Contents/MacOS/fettlematter matter/wrapper/fettlematter.swift
+launchctl bootstrap gui/$(id -u) ops/com.fettle.matter.plist   # after copying it to ~/Library/LaunchAgents
+matter/venv/bin/python matter/commission.py <lamp-ip>          # pairing code in the vendor app
+```
+
+**Why the .app wrapper:** macOS attributes Local Network permission to a bundle
+identity. Bare `python` under launchd/tmux gets **silently denied** (errno 65 on
+any LAN UDP — mDNS, even unicast) with no prompt and no Settings row. The
+`FettleMatter.app` shim exists purely to give the Matter stack a grantable
+identity; launch it once via `open -a FettleMatter` from a GUI session and the
+grant sticks for the launchd service too. If commissioning can't *find* the
+lamp (discovery is multicast), power-cycle it — an un-fabric'd Matter device
+re-opens its pairing window on boot — and commission by IP.
+
+Engine knobs live in `Settings` (`backend/.env` overrides): `home_lat/lon`,
+`lamp_node_id`, `lights_presence_device`, `lights_enabled`. The curve's shape is
+`backend/app/circadian.py`; its regression net is `tests/test_circadian.py`.
+
 ## Repo map
 
 ```
@@ -327,7 +361,10 @@ backend/
     chat.py             SSE bridge: /api/chat ↔ opencode CLI (tools → widgets)
     chat_store.py       Conversation + message persistence
     backup.py           Consistent snapshot of health.db (+tokens) to iCloud Drive
-  mcp_server.py         The 25 MCP tools the coach model calls
+    matter.py           WebSocket client for the Matter controller sidecar
+    circadian.py        The light curve: solar math + schedule-anchored segments
+    lights.py           The engine: presence, manual-touch holdoff, overrides, log
+  mcp_server.py         The MCP tools the coach model calls (health + the lamp)
   cli.py                auth / sync / status / backup commands
   tests/                Regression net over the stats engine (pytest)
 frontend/
@@ -342,6 +379,11 @@ ops/
   install-sync.sh       Generate + load the 6-hourly launchd sync for this checkout
   install-backup.sh     Generate + load the nightly iCloud backup job
   backup.sh             Take one backup snapshot now
+  com.fettle.matter.plist  The Matter controller sidecar (via FettleMatter.app)
+matter/
+  wrapper/fettlematter.swift  The .app shim that makes macOS grant LAN access
+  commission.py         One-shot: put a lamp on the fettle fabric by IP
+  venv/ storage/ logs/  Controller runtime — never committed (fabric keys live here)
 ```
 
 Run the tests with `backend/.venv/bin/python -m pytest backend/tests -q`. They pin

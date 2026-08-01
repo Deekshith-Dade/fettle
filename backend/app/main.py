@@ -11,8 +11,8 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 from . import (
-    auth, benchmarks, briefing, chat, coach, config, goals, insights, push, readiness,
-    schedule, sleep_analysis, store, strain, sync, vital_age, workouts,
+    auth, benchmarks, briefing, chat, coach, config, goals, insights, lights, push,
+    readiness, schedule, sleep_analysis, store, strain, sync, vital_age, workouts,
 )
 from .config import REGISTRY, REGISTRY_BY_NAME, settings
 
@@ -24,9 +24,15 @@ schedule.ensure_seed()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
+
     store.init_db()
     schedule.ensure_seed()
+    stop = asyncio.Event()
+    engine = asyncio.create_task(lights.run_engine(stop))
     yield
+    stop.set()
+    await engine
 
 
 app = FastAPI(title="fettle", version="0.1.0", lifespan=lifespan)
@@ -411,6 +417,76 @@ def schedule_entry_delete(entry_id: int) -> dict:
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     return {"ok": True}
+
+
+# --- circadian lighting --------------------------------------------------------
+
+class LightOverrideIn(BaseModel):
+    mode: str                 # focus | movie | warm | off
+    minutes: int = 60
+
+
+class LightSetIn(BaseModel):
+    on: bool = True
+    level_pct: int | None = None    # 1..100
+    kelvin: int | None = None       # 2200..6500
+
+
+@app.get("/api/lights")
+async def lights_status() -> dict:
+    """Live lamp state + today's planned curve + the last 24h of transitions."""
+    return await lights.status_now()
+
+
+@app.post("/api/lights/override")
+async def lights_override(body: LightOverrideIn) -> dict:
+    try:
+        info = lights.set_override(body.mode, body.minutes)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    await lights.tick()  # take effect now, not at the next 30s tick
+    return {"ok": True, **info}
+
+
+@app.delete("/api/lights/override")
+async def lights_override_clear() -> dict:
+    """Drop override, holdoff, AND any journey — hand the lamp back to the curve."""
+    lights.clear_override()
+    await lights.tick()
+    return {"ok": True}
+
+
+class JourneyIn(BaseModel):
+    kind: str = "nap"
+    minutes: int = 60
+
+
+@app.post("/api/lights/journey")
+async def lights_journey(body: JourneyIn) -> dict:
+    """Start a timed light arc (nap: fade → dark → gentle amber wake ramp)."""
+    try:
+        j = lights.start_journey(body.kind, body.minutes)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    await lights.tick()  # begin the fade now
+    return {"ok": True, "journey": j}
+
+
+@app.post("/api/lights/set")
+async def lights_set(body: LightSetIn) -> dict:
+    """One-shot manual set from the dashboard; the engine holds off for 2h after."""
+    from datetime import datetime, timedelta
+
+    from .circadian import LightTarget
+    level = round((body.level_pct or 50) * 2.54)
+    mireds = round(1_000_000 / body.kelvin) if body.kelvin else 370
+    tgt = LightTarget(body.on, max(1, min(254, level)),
+                      max(154, min(455, mireds)), "api-set", 5)
+    if not await lights.apply(tgt, source="api"):
+        raise HTTPException(502, "Lamp unreachable — is the Matter sidecar up?")
+    store.light_state_save(holdoff_until=(datetime.now() + timedelta(hours=2))
+                           .isoformat(timespec="seconds"))
+    return {"ok": True, "applied": tgt.as_dict()}
 
 
 # --- web push (phone reminders) ------------------------------------------------
